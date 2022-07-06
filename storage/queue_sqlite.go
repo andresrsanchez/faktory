@@ -20,17 +20,17 @@ type sqliteQueue struct {
 }
 
 func (q *sqliteQueue) Pause() error {
-	_, err := q.store.client.Exec("insert into queues(name, status) values (?,?)", q.name, 0)
+	_, err := q.store.db.Exec("insert into queues(name, status) values (?,?)", q.name, 0)
 	return err
 }
 
 func (q *sqliteQueue) Resume() error {
-	_, err := q.store.client.Exec("update queues set status=1 where name=?", q.name)
+	_, err := q.store.db.Exec("update queues set status=1 where name=?", q.name)
 	return err
 }
 
 func (q *sqliteQueue) IsPaused() (r bool) {
-	q.store.client.QueryRow("select status from queues where name=?", q.name).Scan(&r)
+	q.store.db.QueryRow("select status from queues where name=?", q.name).Scan(&r)
 	return r
 }
 
@@ -175,7 +175,7 @@ func (q *sqliteQueue) Delete(vals [][]byte) error {
 }
 
 func (store *sqliteStore) NewQueue(name string) (*sqliteQueue, error) {
-	db, err := sql.Open("sqlite", name)
+	db, err := getConn(name)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +198,7 @@ func (store *sqliteStore) NewQueue(name string) (*sqliteQueue, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, err = store.client.Exec("insert into queues(name) values(?)", name)
+	_, err = store.db.Exec("insert into queues(name) values(?)", name)
 	if err != nil {
 		os.Remove(name)
 	}

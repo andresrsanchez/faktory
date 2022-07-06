@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/contribsys/faktory/client"
@@ -75,7 +76,8 @@ func (e *dummyEntry) Job() (*client.Job, error) {
 }
 
 func NewSqliteStore(name string) (Store, error) {
-	db, err := sql.Open("sqlite", name)
+	os.MkdirAll("./db", os.ModePerm)
+	db, err := getConn(name)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +128,7 @@ func (ss *sqliteStore) initSorted() error {
 		retry integer
 	)`
 	initEntryDB := func(name string) (*sqliteSorted, error) {
-		db, err := sql.Open("sqlite", name)
+		db, err := getConn(name)
 		if err != nil {
 			return nil, err
 		}
@@ -136,7 +138,7 @@ func (ss *sqliteStore) initSorted() error {
 		if err != nil {
 			return nil, err
 		}
-		s := &sqliteSorted{name: "scheduled", store: ss, db: db}
+		s := &sqliteSorted{name: name, store: ss, db: db}
 		return s, nil
 	}
 	var err error
@@ -189,7 +191,7 @@ func (store *sqliteStore) Flush() error {
 	if err != nil {
 		return err
 	}
-	return os.RemoveAll("./dbs")
+	return os.RemoveAll("./db")
 }
 
 func (store *sqliteStore) ExistingQueue(name string) (Queue, bool) {
@@ -211,6 +213,10 @@ func (store *sqliteStore) GetQueue(name string) (Queue, error) {
 		return nil, fmt.Errorf("queue names must match %v", ValidQueueName)
 	}
 	return store.NewQueue(name)
+}
+
+func getConn(name string) (*sql.DB, error) {
+	return sql.Open("sqlite", filepath.Join("db", name))
 }
 
 func (store *sqliteStore) Close() error {
@@ -241,7 +247,7 @@ func (store *sqliteStore) Dead() SortedSet {
 func (store *sqliteStore) EnqueueAll(sset SortedSet) error { //Review process batches?
 	query := `select jid, queue, jobtype, args, created_at, at, retry from jobs limit ? offset ?`
 	batches := func(offset int, limit int) ([]client.Job, error) {
-		db, err := sql.Open("sqlite", sset.Name())
+		db, err := getConn(sset.Name())
 		if err != nil {
 			return nil, err
 		}

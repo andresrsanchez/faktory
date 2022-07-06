@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/contribsys/faktory/client"
@@ -15,25 +16,13 @@ func (ss *sqliteSorted) Name() string {
 	return ss.name
 }
 
-func (ss *sqliteSorted) Size() uint64 {
-	db, err := sql.Open("sqlite", ss.name)
-	if err != nil {
-		return 0
-	}
-	var r uint64
-	err = db.QueryRow("select count(1) from jobs").Scan(&r)
-	if err != nil {
-		return 0
-	}
-	return r
+func (ss *sqliteSorted) Size() (r uint64) {
+	ss.db.QueryRow("select count(1) from jobs").Scan(&r)
+	return
 }
 
 func (ss *sqliteSorted) Clear() error {
-	db, err := sql.Open("sqlite", ss.name)
-	if err != nil {
-		return err
-	}
-	_, err = db.Exec("delete from jobs")
+	_, err := ss.db.Exec("delete from jobs")
 	return err
 }
 
@@ -45,34 +34,26 @@ func (ss *sqliteSorted) Add(job *client.Job) error {
 }
 
 func (ss *sqliteSorted) insertJob(job *client.Job) error {
-	db, err := sql.Open("sqlite", ss.name)
-	if err != nil {
-		return err
-	}
 	b, err := json.Marshal(job.Args)
 	if err != nil {
 		return err
 	}
 	q := `insert into jobs(jid, queue, jobtype, args, created_at, at, retry) values (?,?,?,?,?,?,?)`
-	_, err = db.Exec(q, job.Jid, job.Queue, job.Type, string(b), job.CreatedAt, job.At, job.Retry)
+	_, err = ss.db.Exec(q, job.Jid, job.Queue, job.Type, string(b), job.CreatedAt, job.At, job.Retry)
 	return err
 }
 
 func (ss *sqliteSorted) Get(key []byte) (SortedEntry, error) {
-	db, err := sql.Open("sqlite", ss.name)
-	if err != nil {
-		return nil, err
-	}
 	var args string
 	var j client.Job
 	q := `select jid, queue, jobtype, args, created_at, at, retry from jobs where jid=?`
-	if err = db.QueryRow(q, string(key)).Scan(&j.Jid, &j.Queue, &j.Type, &args, &j.CreatedAt, &j.At, &j.Retry); err != nil {
+	if err := ss.db.QueryRow(q, string(key)).Scan(&j.Jid, &j.Queue, &j.Type, &args, &j.CreatedAt, &j.At, &j.Retry); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
 		return nil, err
 	}
-	err = json.Unmarshal([]byte(args), &j.Args)
+	err := json.Unmarshal([]byte(args), &j.Args)
 	if err != nil {
 		return nil, err
 	}
@@ -80,27 +61,12 @@ func (ss *sqliteSorted) Get(key []byte) (SortedEntry, error) {
 }
 
 func (ss *sqliteSorted) Find(match string, fn func(index int, e SortedEntry) error) error {
-	// db, err := sql.Open("sqlite", ss.name)
-	// if err != nil {
-	// 	return err
-	// }
-	// rows, err := db.Query("select * from jobs where name regexp ?", match)
-	// if err != nil {
-	// 	return err
-	// }
-	// for rows.Next() {
-	// 	rows.Scan()
-	// }
-	return nil
+	return fmt.Errorf("not implemented booo")
 }
 
 func (ss *sqliteSorted) Page(start int, count int, fn func(index int, e SortedEntry) error) (int, error) {
-	db, err := sql.Open("sqlite", ss.name)
-	if err != nil {
-		return 0, err
-	}
 	q := `select jid, queue, jobtype, args, created_at, at, retry from jobs limit ? offset ?`
-	rows, err := db.Query(q, count, start)
+	rows, err := ss.db.Query(q, count, start)
 	if err != nil {
 		return 0, err
 	}
@@ -154,11 +120,7 @@ func (ss *sqliteSorted) RemoveElement(timestamp string, jid string) (bool, error
 }
 
 func (ss *sqliteSorted) delete(jid string) error {
-	db, err := sql.Open("sqlite", ss.name)
-	if err != nil {
-		return err
-	}
-	_, err = db.Exec("delete from jobs where jid=?", jid)
+	_, err := ss.db.Exec("delete from jobs where jid=?", jid)
 	return err
 }
 
@@ -167,16 +129,12 @@ func (ss *sqliteSorted) RemoveBefore(timestamp string, maxCount int64, fn func(d
 	if err != nil {
 		return 0, err
 	}
-	db, err := sql.Open("sqlite", ss.name)
-	if err != nil {
-		return 0, err
-	}
 	q := `DELETE FROM jobs
 	WHERE id in
 	(
 	  SELECT id from jobs where name =? and time <= ? LIMIT ?
 	)`
-	lol, err := db.Exec(q, ss.name, tim, maxCount)
+	lol, err := ss.db.Exec(q, ss.name, tim, maxCount)
 	if err != nil {
 		return 0, err
 	}
