@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"encoding/json"
 	"os"
 	"testing"
 
@@ -22,20 +21,18 @@ func TestSqliteBasicQueueOps(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Nil(t, data)
 
-			j := client.NewJob("hello")
-			hello, _ := json.Marshal(j)
+			hello := client.NewJob("hello")
 			err = q.Push(hello)
 			assert.NoError(t, err)
 			assert.EqualValues(t, 1, q.Size())
 
-			j = client.NewJob("world")
-			world, _ := json.Marshal(j)
+			world := client.NewJob("world")
 			err = q.Push(world)
 			assert.NoError(t, err)
 			assert.EqualValues(t, 2, q.Size())
 
-			values := [][]byte{hello, world}
-			err = q.Each(func(idx int, value []byte) error {
+			values := []*client.Job{hello, world}
+			err = q.Each(func(idx int, value *client.Job) error {
 				assert.Equal(t, values[idx], value)
 				return nil
 			})
@@ -74,8 +71,7 @@ func TestSqliteBasicQueueOps(t *testing.T) {
 			assert.NoError(t, err)
 
 			assert.EqualValues(t, 0, q.Size())
-			j := client.NewJob("first")
-			first, _ := json.Marshal(j)
+			first := client.NewJob("first")
 			err = q.Push(first)
 			assert.NoError(t, err)
 			n := 5000
@@ -83,14 +79,12 @@ func TestSqliteBasicQueueOps(t *testing.T) {
 			// Get Size() each time
 
 			for i := 0; i < n; i++ {
-				j := client.NewJob("fake")
-				world, _ := json.Marshal(j)
+				world := client.NewJob("fake")
 				err = q.Push(world)
 				assert.NoError(t, err)
 				assert.EqualValues(t, i+2, q.Size())
 			}
-			j = client.NewJob("last")
-			last, _ := json.Marshal(j)
+			last := client.NewJob("last")
 			err = q.Push(last)
 			assert.NoError(t, err)
 			assert.EqualValues(t, n+2, q.Size())

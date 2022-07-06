@@ -27,7 +27,7 @@ type Store interface {
 	EachQueue(func(Queue))
 	Stats() map[string]string
 	EnqueueAll(SortedSet) error
-	EnqueueFrom(SortedSet, []byte) error
+	EnqueueFrom(SortedSet, string) error
 	PausedQueues() ([]string, error)
 
 	History(days int, fn func(day string, procCnt uint64, failCnt uint64)) error
@@ -45,10 +45,18 @@ type Store interface {
 	Sqlite() (string, *sql.DB)
 }
 
+type KV interface {
+	Get(key string) ([]byte, error)
+	Set(key string, value []byte) error
+}
+
 type Redis interface {
 	Redis() *redis.Client
 }
 
+//crear un programa aparte con 3 worker insertando en bd con un maxconn
+//crear un programa aparte con 3 worker insertando en bd con un busytimeout
+//cgo lsm for history and sset?
 type Queue interface {
 	Name() string
 	Size() uint64
@@ -58,21 +66,19 @@ type Queue interface {
 	IsPaused() bool
 
 	Add(job *client.Job) error
-	Push(data []byte) error
+	Push(data *client.Job) error
 
-	Pop() ([]byte, error)
-	BPop(context.Context) ([]byte, error)
+	Pop() (*client.Job, error)
+	BPop(context.Context) (*client.Job, error)
 	Clear() (uint64, error)
 
-	Each(func(index int, data []byte) error) error
-	Page(start int64, count int64, fn func(index int, data []byte) error) error
+	Each(func(index int, data *client.Job) error) error
+	Page(start int64, count int64, fn func(index int, data *client.Job) error) error
 
-	Delete(keys [][]byte) error
+	Delete(keys []string) error
 }
 
 type SortedEntry interface {
-	Value() []byte
-	Key() ([]byte, error)
 	Job() (*client.Job, error)
 }
 
@@ -82,9 +88,9 @@ type SortedSet interface {
 	Clear() error
 
 	Add(job *client.Job) error
-	AddElement(timestamp string, jid string, payload []byte) error
+	AddElement(timestamp string, job *client.Job) error
 
-	Get(key []byte) (SortedEntry, error)
+	Get(key string) (SortedEntry, error)
 	Page(start int, count int, fn func(index int, e SortedEntry) error) (int, error)
 	Each(fn func(idx int, e SortedEntry) error) error
 
@@ -93,9 +99,9 @@ type SortedSet interface {
 	// bool is whether or not the element was actually removed from the sset.
 	// the scheduler and other things can be operating on the sset concurrently
 	// so we need to be careful about the data changing under us.
-	Remove(key []byte) (bool, error)
+	Remove(key string) (bool, error)
 	RemoveElement(timestamp string, jid string) (bool, error)
-	RemoveBefore(timestamp string, maxCount int64, fn func(data []byte) error) (int64, error)
+	RemoveBefore(timestamp string, maxCount int64, fn func(job *client.Job) error) (int64, error)
 	RemoveEntry(ent SortedEntry) error
 
 	// Move the given key from this SortedSet to the given

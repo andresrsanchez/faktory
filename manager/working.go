@@ -82,13 +82,22 @@ func (m *manager) loadWorkingSet() error {
 
 	addedCount := 0
 	err := m.store.Working().Each(func(idx int, entry storage.SortedEntry) error {
-		res, err := unmarshalReservation(entry.Value())
+		job, err := entry.Job()
 		if err != nil {
-			//  We can't return an error here, this method is best effort
-			// as we are booting the server. We can't allow corrupted data
-			// to stop Faktory from starting.
 			util.Error("Unable to restore working job", err)
 			return nil
+		}
+		var aux dareservation
+		err = json.Unmarshal([]byte(job.Reservation), &aux)
+		if err != nil {
+			util.Error("Unable to restore working job", err)
+			return nil
+		}
+		res := &Reservation{
+			Job:    job,
+			Since:  aux.Since,
+			Expiry: aux.Expiry,
+			Wid:    aux.Wid,
 		}
 		m.workingMap[res.Job.Jid] = res
 		addedCount++
@@ -105,6 +114,12 @@ func (m *manager) loadWorkingSet() error {
 	}
 
 	return nil
+}
+
+type dareservation struct {
+	Since  string `json:"reserved_at"`
+	Expiry string `json:"expires_at"`
+	Wid    string `json:"wid"`
 }
 
 func (m *manager) reserve(wid string, lease Lease) error {
@@ -135,12 +150,14 @@ func (m *manager) reserve(wid string, lease Lease) error {
 		tsince:  now,
 		texpiry: exp,
 	}
+	r, _ := json.Marshal(&dareservation{
+		Since:  res.Since,
+		Expiry: res.Expiry,
+		Wid:    wid,
+	})
+	job.Reservation = string(r)
 	res.Job.At = res.Expiry //what the actual fuck
-	data, err := res.marshal()
-	if err != nil {
-		return fmt.Errorf("cannot marshal reservation payload: %w", err)
-	}
-	err = m.store.Working().AddElement(res.Expiry, job.Jid, data)
+	err := m.store.Working().AddElement(res.Expiry, job)
 	if err != nil {
 		return fmt.Errorf("cannot add element in the working set: %w", err)
 	}
@@ -302,12 +319,18 @@ func (m *manager) ReapExpiredJobs(when time.Time) (int64, error) {
 	total := int64(0)
 	for {
 		tm := util.Thens(when)
-		count, err := m.store.Working().RemoveBefore(tm, 10, func(data []byte) error {
-			res, err := unmarshalReservation(data)
+		count, err := m.store.Working().RemoveBefore(tm, 10, func(job *client.Job) error {
+			var aux dareservation
+			err := json.Unmarshal([]byte(job.Reservation), &aux)
 			if err != nil {
-				return fmt.Errorf("cannot unmarshal reservation payload: %w", err)
+				return err
 			}
-
+			res := &Reservation{
+				Job:    job,
+				Since:  aux.Since,
+				Expiry: aux.Expiry,
+				Wid:    aux.Wid,
+			}
 			jid := res.Job.Jid
 			m.workingMutex.Lock()
 			localres, ok := m.workingMap[jid]
@@ -322,15 +345,14 @@ func (m *manager) ReapExpiredJobs(when time.Time) (int64, error) {
 				localres.texpiry = localres.extension
 				localres.Expiry = util.Thens(localres.extension)
 				util.Debugf("Auto-extending reservation time for %s to %s", jid, localres.Expiry)
-				err = m.store.Working().AddElement(localres.Expiry, jid, data)
+				err = m.store.Working().AddElement(localres.Expiry, job)
 				if err != nil {
 					return fmt.Errorf("cannot extend reservation for %q job: %w", jid, err)
 				}
 				return nil
 			}
 
-			job := res.Job
-			err = m.processFailure(job.Jid, JobReservationExpired)
+			err = m.processFailure(res.Job.Jid, JobReservationExpired)
 			if err != nil {
 				return fmt.Errorf("cannot retry reservation: %w", err)
 			}

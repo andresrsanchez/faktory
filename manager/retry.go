@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -143,22 +142,13 @@ func (m *manager) processFailure(jid string, failure *FailPayload) error {
 func retryLater(store storage.Store, job *client.Job) error {
 	when := util.Thens(nextRetry(job))
 	job.Failure.NextAt = when
-	bytes, err := json.Marshal(job)
-	if err != nil {
-		return fmt.Errorf("cannot marshal job payload: %w", err)
-	}
 
-	return store.Retries().AddElement(when, job.Jid, bytes)
+	return store.Retries().AddElement(when, job)
 }
 
 func sendToMorgue(store storage.Store, job *client.Job) error {
-	bytes, err := json.Marshal(job)
-	if err != nil {
-		return fmt.Errorf("cannot marshal job payload: %w", err)
-	}
-
 	expiry := util.Thens(time.Now().Add(DeadTTL))
-	return store.Dead().AddElement(expiry, job.Jid, bytes)
+	return store.Dead().AddElement(expiry, job)
 }
 
 func nextRetry(job *client.Job) time.Time {

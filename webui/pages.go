@@ -77,11 +77,11 @@ func queueHandler(w http.ResponseWriter, r *http.Request) {
 				}
 				bkeys[idx] = bindata
 			}
-			err := q.Delete(bkeys)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
+			// err := q.Delete(bkeys)
+			// if err != nil {
+			// 	http.Error(w, err.Error(), http.StatusInternalServerError)
+			// 	return
+			// }
 		} else {
 			action := r.FormValue("action")
 			if action == "delete" {
@@ -182,7 +182,7 @@ func retryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := set.Get([]byte(key))
+	data, err := set.Get(key)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -262,7 +262,7 @@ func scheduledJobHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := set.Get([]byte(key))
+	data, err := set.Get(key)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -324,7 +324,7 @@ func deadHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid URL input", http.StatusBadRequest)
 		return
 	}
-	data, err := ctx(r).Store().Dead().Get([]byte(key))
+	data, err := ctx(r).Store().Dead().Get(key)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

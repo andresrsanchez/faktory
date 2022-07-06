@@ -4,18 +4,22 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/contribsys/faktory/client"
 	"github.com/contribsys/faktory/util"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 type sqliteQueue struct {
-	db    *sql.DB
-	name  string
-	store *sqliteStore
-	done  bool
+	db         *sql.DB
+	name       string
+	store      *sqliteStore
+	done       bool
+	stmtDelete *sql.Stmt
 }
 
 func (q *sqliteQueue) Pause() error {
@@ -41,7 +45,8 @@ func (q *sqliteQueue) Name() string {
 	return q.name
 }
 
-func (q *sqliteQueue) Page(start int64, count int64, fn func(index int, data []byte) error) error {
+//faltar parametros al job
+func (q *sqliteQueue) Page(start int64, count int64, fn func(index int, job *client.Job) error) error {
 	query := `select jid, queue, jobtype, args, created_at, at, retry from jobs limit ? offset ?`
 	rows, err := q.db.Query(query, count, start)
 	if err != nil {
@@ -50,21 +55,12 @@ func (q *sqliteQueue) Page(start int64, count int64, fn func(index int, data []b
 	var idx int
 	defer rows.Close()
 	for rows.Next() {
-		var args string
 		var j client.Job
-		err = rows.Scan(&j.Jid, &j.Queue, &j.Type, &args, &j.CreatedAt, &j.At, &j.Retry)
+		err = rows.Scan(&j.Jid, &j.Queue, &j.Type, &j.ArgsRaw, &j.CreatedAt, &j.At, &j.Retry)
 		if err != nil {
 			return err
 		}
-		err = json.Unmarshal([]byte(args), &j.Args)
-		if err != nil {
-			return err //or continue¿?
-		}
-		p, err := json.Marshal(j)
-		if err != nil {
-			return err
-		}
-		err = fn(idx, p)
+		err = fn(idx, &j)
 		if err != nil {
 			return err
 		}
@@ -73,7 +69,7 @@ func (q *sqliteQueue) Page(start int64, count int64, fn func(index int, data []b
 	return nil
 }
 
-func (q *sqliteQueue) Each(fn func(index int, data []byte) error) error {
+func (q *sqliteQueue) Each(fn func(index int, job *client.Job) error) error {
 	return q.Page(0, -1, fn)
 }
 
@@ -104,53 +100,88 @@ func (q *sqliteQueue) Add(job *client.Job) error {
 }
 
 func (q *sqliteQueue) insertIntoQueue(job *client.Job) error {
-	b, err := json.Marshal(job.Args)
-	if err != nil {
-		return err
+	var fail string
+	if job.Failure != nil {
+		data, _ := json.Marshal(job.Failure)
+		fail = string(data)
 	}
-	query := `insert into jobs(jid, queue, jobtype, args, created_at, at, retry, enqueued_at) values (?,?,?,?,?,?,?,?)`
-	_, err = q.db.Exec(query, job.Jid, job.Queue, job.Type, string(b), job.CreatedAt, job.At, job.Retry, job.EnqueuedAt)
+	query := `insert into jobs(jid, queue, jobtype, args, created_at, at, retry, 
+		enqueued_at, backtrace, failure) values (?,?,?,?,?,?,?,?,?,?)`
+	_, err := q.db.Exec(query, job.Jid, job.Queue, job.Type, job.ArgsRaw, job.CreatedAt, job.At, job.Retry, job.EnqueuedAt, job.Backtrace, fail)
 	return err
 }
 
-func (q *sqliteQueue) Push(payload []byte) error {
-	var j client.Job
-	err := json.Unmarshal(payload, &j)
-	if err != nil {
-		return err
-	}
-	return q.insertIntoQueue(&j)
+func (q *sqliteQueue) Push(j *client.Job) error {
+	return q.insertIntoQueue(j)
 }
 
-func (q *sqliteQueue) Pop() ([]byte, error) {
+type Raw struct {
+	rBuffer []sql.RawBytes
+	args    []interface{}
+}
+
+var pool = sync.Pool{
+	New: func() interface{} {
+		rawBuffer := make([]sql.RawBytes, 8)
+		scanCallArgs := make([]interface{}, len(rawBuffer))
+		for i := range rawBuffer {
+			scanCallArgs[i] = &rawBuffer[i]
+		}
+		return &Raw{
+			rBuffer: rawBuffer,
+			args:    scanCallArgs,
+		}
+	},
+}
+
+func (q *sqliteQueue) Pop() (*client.Job, error) {
 	if q.done {
 		return nil, nil
 	}
-	var args string
-	var enq, at sql.NullString
-	query := "delete from jobs where id = (select MIN(id) from jobs) returning jid, queue, jobtype, args, created_at, at, retry, enqueued_at"
-	var j client.Job
-	if err := q.db.QueryRow(query).Scan(&j.Jid, &j.Queue, &j.Type, &args, &j.CreatedAt, &at, &j.Retry, &enq); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, err
-	}
-	j.EnqueuedAt = enq.String
-	j.At = at.String
-	err := json.Unmarshal([]byte(args), &j.Args)
+	rows, err := q.stmtDelete.Query()
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(j)
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, nil
+	}
+	raw := pool.Get().(*Raw)
+	err = rows.Scan(raw.args...)
+	if err != nil {
+		return nil, err
+	}
+	re := &client.Job{
+		Jid:     string(raw.rBuffer[0]),
+		Queue:   string(raw.rBuffer[1]),
+		Type:    string(raw.rBuffer[2]),
+		ArgsRaw: string(raw.rBuffer[3]),
+		// Args:        rawBuffer[3],
+		CreatedAt:  string(raw.rBuffer[4]),
+		EnqueuedAt: string(raw.rBuffer[7]),
+		At:         string(raw.rBuffer[5]),
+		// Retry:      raw.rBuffer[6].(int),
+		// Failure:    &client.Failure{}, //review
+	}
+	retry := raw.rBuffer[6]
+	if retry != nil {
+		r, err := strconv.Atoi(string(retry))
+		if err != nil {
+			return nil, err
+		}
+		re.Retry = &r
+	}
+
+	pool.Put(raw)
+	return re, nil
 }
 
-func (q *sqliteQueue) BPop(ctx context.Context) ([]byte, error) {
-	var args string
+//review nullstrings
+func (q *sqliteQueue) BPop(ctx context.Context) (*client.Job, error) {
 	var enq, at sql.NullString
 	query := "delete from jobs where id = (select MIN(id) from jobs) returning jid, queue, jobtype, args, created_at, at, retry, enqueued_at"
 	var j client.Job
-	if err := q.db.QueryRowContext(ctx, query).Scan(&j.Jid, &j.Queue, &j.Type, &args, &j.CreatedAt, &at, &j.Retry, &enq); err != nil {
+	if err := q.db.QueryRowContext(ctx, query).Scan(&j.Jid, &j.Queue, &j.Type, &j.ArgsRaw, &j.CreatedAt, &at, &j.Retry, &enq); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -162,23 +193,15 @@ func (q *sqliteQueue) BPop(ctx context.Context) ([]byte, error) {
 	if at.Valid {
 		j.At = at.String
 	}
-	err := json.Unmarshal([]byte(args), &j.Args)
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(j)
+	return &j, nil
 }
 
-func (q *sqliteQueue) Delete(vals [][]byte) error {
+func (q *sqliteQueue) Delete(vals []string) error {
 	if len(vals) == 0 {
 		return nil
 	}
 	query := "delete from jobs where jid in (?" + strings.Repeat(",?", len(vals)-1) + ")"
-	var jids []string
-	for _, v := range vals {
-		jids = append(jids, string(v))
-	}
-	_, err := q.db.Exec(query, jids)
+	_, err := q.db.Exec(query, vals) //no deberia fucionar
 	return err
 }
 
@@ -187,6 +210,16 @@ func (store *sqliteStore) NewQueue(name string) (*sqliteQueue, error) {
 	if err != nil {
 		return nil, err
 	}
+	_, err = db.Exec("PRAGMA journal_mode = WAL")
+	if err != nil {
+		fmt.Println("pragmatic1")
+		fmt.Println(err)
+	}
+	_, err = db.Exec("PRAGMA synchronous = NORMAL")
+	if err != nil {
+		fmt.Println("pragmatic2")
+		fmt.Println(err)
+	}
 	q := `
 	create table if not exists jobs (
 		id integer not null primary key, 
@@ -194,22 +227,15 @@ func (store *sqliteStore) NewQueue(name string) (*sqliteQueue, error) {
 		queue text not null,
 		jobtype text not null,
 		args text not null,
-		created_at datetime,
-		enqueued_at datetime,
-		at datetime not null,
+		created_at text,
+		enqueued_at text,
+		at text not null,
+		reserve_for integer,
 		retry integer,
-		reserved_at datetime,
-		expires_at datetime,
+		reserved_at text,
+		expires_at text,
 		backtrace int,
-		wid text,
-		reserve_for int,
-		retry_count int,
-		remaining int,
-		failed_at datetime,
-		next_at datetime,
-		err_msg text,
-		err_type text,
-		fbacktrace text
+		failure text
 	)`
 	_, err = db.Exec(q)
 	if err != nil {
@@ -225,6 +251,7 @@ func (store *sqliteStore) NewQueue(name string) (*sqliteQueue, error) {
 		store: store,
 		db:    db,
 	}
+	sq.stmtDelete, _ = db.Prepare("delete from jobs where id = (select MIN(id) from jobs) returning jid, queue, jobtype, args, created_at, at, retry, enqueued_at")
 	store.queueSet[name] = sq //unsafe
 	return sq, nil
 }

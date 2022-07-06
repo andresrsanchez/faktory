@@ -1,7 +1,6 @@
 package manager
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -15,7 +14,7 @@ func (m *manager) Purge(when time.Time) (int64, error) {
 	// than N elements.  The dead set shouldn't be able to collect
 	// millions or billions of jobs.  Sidekiq uses a default max size
 	// of 10,000 jobs.
-	dead, err := m.store.Dead().RemoveBefore(util.Thens(when), 100, func([]byte) error {
+	dead, err := m.store.Dead().RemoveBefore(util.Thens(when), 100, func(job *client.Job) error {
 		return nil
 	})
 	if err != nil {
@@ -35,13 +34,8 @@ func (m *manager) RetryJobs(when time.Time) (int64, error) {
 func (m *manager) schedule(when time.Time, set storage.SortedSet) (int64, error) {
 	total := int64(0)
 	for {
-		count, err := set.RemoveBefore(util.Thens(when), 100, func(data []byte) error {
-			var job client.Job
-			if err := json.Unmarshal(data, &job); err != nil {
-				return fmt.Errorf("cannot unmarshal job payload: %w", err)
-			}
-
-			if err := m.enqueue(&job); err != nil {
+		count, err := set.RemoveBefore(util.Thens(when), 100, func(job *client.Job) error {
+			if err := m.enqueue(job); err != nil {
 				return fmt.Errorf("cannot push job to %q queue: %w", job.Queue, err)
 			}
 			return nil

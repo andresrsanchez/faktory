@@ -6,19 +6,31 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"time"
 
 	"github.com/contribsys/faktory/client"
 	"github.com/contribsys/faktory/util"
 	"github.com/go-redis/redis"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
+)
+
+var (
+	ValidQueueName = regexp.MustCompile(`\A[a-zA-Z0-9._-]+\z`)
+)
+
+var (
+	Open = openSqlite
+	Boot = bootSqlite
+	Stop = stopSqlite
 )
 
 type sqliteSorted struct {
-	name  string
-	store *sqliteStore
-	db    *sql.DB
+	name       string
+	store      *sqliteStore
+	db         *sql.DB
+	stmtInsert *sql.Stmt
 }
 type sqliteStore struct {
 	Name      string
@@ -32,47 +44,19 @@ type sqliteStore struct {
 }
 
 type dummyEntry struct {
-	value []byte
-	job   *client.Job
-	key   []byte
+	job *client.Job
 }
 
 func NewDummyEntry(j *client.Job) *dummyEntry {
-	b, _ := json.Marshal(j)
 	return &dummyEntry{
-		job:   j,
-		value: b,
-		key:   []byte(j.Jid),
+		job: j,
 	}
-}
-
-func (e *dummyEntry) Value() []byte {
-	return e.value
-}
-
-func (e *dummyEntry) Key() ([]byte, error) {
-	if e.key != nil {
-		return e.key, nil
-	}
-	j, err := e.Job()
-	if err != nil {
-		return nil, err
-	}
-	return []byte(j.Jid), nil
 }
 
 func (e *dummyEntry) Job() (*client.Job, error) {
-	if e.job != nil {
-		return e.job, nil
+	if e.job == nil {
+		panic(fmt.Errorf("nil job"))
 	}
-
-	var job client.Job
-	err := json.Unmarshal(e.value, &job)
-	if err != nil {
-		return nil, err
-	}
-
-	e.job = &job
 	return e.job, nil
 }
 
@@ -106,6 +90,8 @@ func NewSqliteStore(name string) (Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	db.Exec("PRAGMA journal_mode = WAL")
+	db.Exec("PRAGMA synchronous = NORMAL")
 
 	_, err = db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS name_date ON history(name, date);")
 	if err != nil {
@@ -145,29 +131,29 @@ func (ss *sqliteStore) initSorted() error {
 		enqueued_at datetime,
 		at datetime not null,
 		retry integer,
+		reserve_for integer,
 		reserved_at datetime,
 		expires_at datetime,
 		backtrace int,
-		wid text,
-		reserve_for int,
-		retry_count int,
-		remaining int,
-		failed_at datetime,
-		next_at datetime,
-		err_msg text,
-		err_type text,
-		fbacktrace text
+		failure text,
+		reservation text
 	)`
 	initEntryDB := func(name string) (*sqliteSorted, error) {
 		db, err := getConn(ss.Name, name)
 		if err != nil {
 			return nil, err
 		}
+		db.Exec("PRAGMA journal_mode = WAL")
+		db.Exec("PRAGMA synchronous = NORMAL")
 		_, err = db.Exec(q)
 		if err != nil {
 			return nil, err
 		}
+		q := `insert into jobs(jid, queue, jobtype, args, created_at, enqueued_at, at, reserve_for, 
+			retry, backtrace, failure, reservation) values (?,?,?,?,?,?,?,?,?,?,?,?)`
+
 		s := &sqliteSorted{name: name, store: ss, db: db}
+		s.stmtInsert, _ = db.Prepare(q)
 		return s, nil
 	}
 	var err error
@@ -185,83 +171,6 @@ func (ss *sqliteStore) initSorted() error {
 	}
 	ss.working, err = initEntryDB("working")
 	return err
-}
-
-func ScanJob(rows *sql.Rows) (*client.Job, error) {
-	j := &client.Job{Failure: &client.Failure{}}
-	var args string
-	var created, enqueue, at, failed, next, msg, etype, fbacktrace sql.NullString
-	var reserve, retry, rcount, remaining, trace sql.NullInt32
-	err := rows.Scan(&j.Jid, &j.Queue, &j.Type, &args, &created, &at, &enqueue, &retry, &reserve, &trace, &rcount, &remaining, &failed, &next, &msg, &etype, &fbacktrace)
-	if err != nil {
-		return nil, err
-	}
-	json.Unmarshal([]byte(args), &j.Args)
-	j.CreatedAt = created.String
-	j.EnqueuedAt = enqueue.String
-	j.At = at.String
-	//*j.Retry = int(retry.Int32)
-	j.ReserveFor = int(reserve.Int32)
-	j.Backtrace = int(trace.Int32)
-	j.Failure.RetryCount = int(rcount.Int32)
-	j.Failure.RetryRemaining = int(remaining.Int32)
-	j.Failure.FailedAt = failed.String
-	j.Failure.NextAt = next.String
-	j.Failure.ErrorMessage = msg.String
-	j.Failure.ErrorType = etype.String
-	//j.Failure.Backtrace = fbacktrace
-	return j, nil
-}
-
-func scanThing(rows *sql.Rows) (interface{}, error) {
-	j := struct {
-		Jid              string        `json:"jid"`
-		Queue            string        `json:"queue"`
-		Type             string        `json:"jobtype"`
-		Args             []interface{} `json:"args"`
-		CreatedAt        string        `json:"created_at,omitempty"`
-		EnqueuedAt       string        `json:"enqueued_at,omitempty"`
-		At               string        `json:"at,omitempty"`
-		ReserveFor       int           `json:"reserve_for,omitempty"`
-		Retry            *int          `json:"retry"`
-		Backtrace        int           `json:"backtrace,omitempty"`
-		RetryCount       int           `json:"retry_count"`
-		RetryRemaining   int           `json:"remaining"`
-		FailedAt         string        `json:"failed_at"`
-		NextAt           string        `json:"next_at,omitempty"`
-		ErrorMessage     string        `json:"message,omitempty"`
-		ErrorType        string        `json:"errtype,omitempty"`
-		FailureBacktrace []string      `json:"fbacktrace,omitempty"`
-		Since            string        `json:"reserved_at"`
-		Expiry           string        `json:"expires_at"`
-		Wid              string        `json:"wid"`
-	}{}
-	var args string
-	var created, enqueue, at, failed, next, msg, etype, fbacktrace, since, expiry, wid sql.NullString
-	var reserve, retry, rcount, remaining, trace sql.NullInt32
-	err := rows.Scan(&j.Jid, &j.Queue, &j.Type, &args, &created, &at, &enqueue, &retry, &reserve, &trace, &rcount, &remaining, &failed, &next, &msg, &etype, &fbacktrace, &since, &expiry, &wid)
-	if err != nil {
-		return nil, err
-	}
-	json.Unmarshal([]byte(args), &j.Args)
-	j.CreatedAt = created.String
-	j.EnqueuedAt = enqueue.String
-	j.At = at.String
-	//*j.Retry = int(retry.Int32)
-	j.ReserveFor = int(reserve.Int32)
-	j.Backtrace = int(trace.Int32)
-	j.RetryCount = int(rcount.Int32)
-	j.RetryRemaining = int(remaining.Int32)
-	j.FailedAt = failed.String
-	j.NextAt = next.String
-	j.ErrorMessage = msg.String
-	j.ErrorType = etype.String
-	//j.Failure.Backtrace = fbacktrace
-	j.Since = since.String
-	j.Expiry = expiry.String
-	j.Wid = wid.String
-
-	return j, nil
 }
 
 func (store *sqliteStore) Stats() map[string]string {
@@ -296,9 +205,8 @@ func (store *sqliteStore) EachQueue(x func(Queue)) {
 func (store *sqliteStore) Flush() error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	pragmas := "&_journal_mode=WAL&_synchronous=NORMAL&cache=shared"
 	for k := range store.queueSet {
-		db, _ := sql.Open("sqlite3", filepath.Join(store.Name, fmt.Sprintf("%s?%s", k, pragmas)))
+		db, _ := sql.Open("sqlite", filepath.Join(store.Name, k))
 		_, err := db.Exec("delete from jobs")
 		if err != nil {
 			return err
@@ -356,8 +264,9 @@ func (store *sqliteStore) GetQueue(name string) (Queue, error) {
 }
 
 func getConn(folder string, name string) (*sql.DB, error) {
-	pragmas := "&_journal_mode=WAL&_synchronous=NORMAL&cache=shared"
-	return sql.Open("sqlite3", filepath.Join(folder, fmt.Sprintf("%s?%s", name, pragmas)))
+	db, err := sql.Open("sqlite", filepath.Join(folder, name))
+	db.SetMaxOpenConns(1)
+	return db, err
 }
 
 func (store *sqliteStore) Close() error {
@@ -427,7 +336,7 @@ func (store *sqliteStore) EnqueueAll(sset SortedSet) error { //Review process ba
 			if err != nil {
 				return err
 			}
-			_, err = sset.Remove([]byte(j.Jid)) //danger ignore param _
+			_, err = sset.Remove(j.Jid) //danger ignore param _
 			if err != nil {
 				return err
 			}
@@ -440,7 +349,7 @@ func (store *sqliteStore) EnqueueAll(sset SortedSet) error { //Review process ba
 	return nil
 }
 
-func (store *sqliteStore) EnqueueFrom(sset SortedSet, key []byte) error {
+func (store *sqliteStore) EnqueueFrom(sset SortedSet, key string) error {
 	entry, err := sset.Get(key)
 	if err != nil {
 		return err
@@ -476,7 +385,6 @@ func (store *sqliteStore) EnqueueFrom(sset SortedSet, key []byte) error {
 
 func (store *sqliteStore) Success() error {
 	_, err := store.db.Exec("insert into history(name) values (?) on conflict(name,date) do update set count=count+1", "processed")
-	// _, err := store.db.Exec("insert into history(name) values (?)", "processed")
 	return err
 }
 func (store *sqliteStore) TotalProcessed() (r uint64) {
@@ -488,7 +396,6 @@ func (store *sqliteStore) TotalFailures() (r uint64) {
 	return
 }
 func (store *sqliteStore) Failure() error {
-	// _, err := store.db.Exec("insert into history(name) values (?)", "failures")
 	_, err := store.db.Exec("insert into history(name) values (?),(?) on conflict(name,date) do update set count=count+1", "failures", "processed")
 	return err
 }

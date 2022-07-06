@@ -1,7 +1,6 @@
 package manager
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -128,9 +127,7 @@ func TestScheduler(t *testing.T) {
 
 func addJob(t *testing.T, set storage.SortedSet, timestamp string, job *client.Job) {
 	job.At = timestamp
-	data, err := json.Marshal(job)
-	assert.NoError(t, err)
 
-	err = set.AddElement(timestamp, job.Jid, data)
+	err := set.AddElement(timestamp, job)
 	assert.NoError(t, err)
 }

@@ -32,20 +32,22 @@ type Failure struct {
 
 type Job struct {
 	// required
-	Jid   string        `json:"jid"`
-	Queue string        `json:"queue"`
-	Type  string        `json:"jobtype"`
-	Args  []interface{} `json:"args"`
+	Jid     string        `json:"jid"`
+	Queue   string        `json:"queue"`
+	Type    string        `json:"jobtype"`
+	Args    []interface{} `json:"args"`
+	ArgsRaw string
 
 	// optional
-	CreatedAt  string                 `json:"created_at,omitempty"`
-	EnqueuedAt string                 `json:"enqueued_at,omitempty"`
-	At         string                 `json:"at,omitempty"`
-	ReserveFor int                    `json:"reserve_for,omitempty"`
-	Retry      *int                   `json:"retry"`
-	Backtrace  int                    `json:"backtrace,omitempty"`
-	Failure    *Failure               `json:"failure,omitempty"`
-	Custom     map[string]interface{} `json:"custom,omitempty"`
+	CreatedAt   string                 `json:"created_at,omitempty"`
+	EnqueuedAt  string                 `json:"enqueued_at,omitempty"`
+	At          string                 `json:"at,omitempty"`
+	ReserveFor  int                    `json:"reserve_for,omitempty"`
+	Retry       *int                   `json:"retry"`
+	Backtrace   int                    `json:"backtrace,omitempty"`
+	Failure     *Failure               `json:"failure,omitempty"`
+	Custom      map[string]interface{} `json:"custom,omitempty"`
+	Reservation string                 `json:"reservation,omitempty"`
 }
 
 // Clients should use this constructor to build a Job, not allocate

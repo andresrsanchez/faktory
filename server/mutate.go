@@ -38,7 +38,6 @@ func mutateRequeue(store storage.Store, op client.Operation) error {
 	}
 	match, _ := matchForFilter(op.Filter)
 	return ss.Find(match, func(idx int, ent storage.SortedEntry) error {
-		//if matchfn(string(ent.Value())) {
 		j, err := ent.Job()
 		if err != nil {
 			return err
@@ -47,13 +46,11 @@ func mutateRequeue(store storage.Store, op client.Operation) error {
 		if err != nil {
 			return err
 		}
-		err = q.Push(ent.Value())
+		err = q.Push(j)
 		if err != nil {
 			return err
 		}
 		return ss.RemoveEntry(ent)
-		//}
-		//return nil
 	})
 }
 

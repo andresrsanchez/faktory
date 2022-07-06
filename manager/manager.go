@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -166,7 +165,6 @@ func (m *manager) AddMiddleware(fntype string, fn MiddlewareFunc) {
 
 type Lease interface {
 	Release() error
-	Payload() []byte
 	Job() (*client.Job, error)
 }
 
@@ -221,13 +219,8 @@ func (m *manager) Push(job *client.Job) error {
 	err = callMiddleware(m.pushChain, Ctx{context.Background(), job, m, nil}, func() error {
 		if job.At != "" {
 			if t.After(time.Now()) {
-				data, err := json.Marshal(job)
-				if err != nil {
-					return fmt.Errorf("cannot marshal job payload: %w", err)
-				}
-
 				// scheduler for later
-				return m.store.Scheduled().AddElement(job.At, job.Jid, data)
+				return m.store.Scheduled().AddElement(job.At, job)
 			}
 		}
 		return m.enqueue(job)
@@ -245,11 +238,6 @@ func (m *manager) enqueue(job *client.Job) error {
 	if err != nil {
 		return fmt.Errorf("cannot get %q queue: %w", job.Queue, err)
 	}
-
 	job.EnqueuedAt = util.Nows()
-	data, err := json.Marshal(job)
-	if err != nil {
-		return fmt.Errorf("cannot marshal job payload: %w", err)
-	}
-	return q.Push(data)
+	return q.Push(job)
 }

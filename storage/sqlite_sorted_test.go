@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -60,14 +59,12 @@ func TestSqliteBasicSortedOps(t *testing.T) {
 
 			tim := util.Nows()
 			first := client.NewJob("dummy")
-			data, _ := json.Marshal(first)
 			jid := first.Jid
-			err := sset.AddElement(tim, jid, data)
+			err := sset.AddElement(tim, first)
 			assert.NoError(t, err)
 			assert.EqualValues(t, 1, sset.Size())
 
-			key := jid
-			entry, err := sset.Get([]byte(key))
+			entry, err := sset.Get(jid)
 			assert.NoError(t, err)
 			assert.NotNil(t, entry)
 			job, err := entry.Job()
@@ -77,18 +74,17 @@ func TestSqliteBasicSortedOps(t *testing.T) {
 			// add a second job with exact same time to handle edge case of
 			// sorted set entries with same score.
 			second := client.NewJob("dummy")
-			payload, _ := json.Marshal(second)
 			newjid := second.Jid
-			err = sset.AddElement(tim, newjid, payload)
+			err = sset.AddElement(tim, second)
 			assert.NoError(t, err)
 			assert.EqualValues(t, 2, sset.Size())
 
-			newkey := newjid
-			entry, err = sset.Get([]byte(newkey))
+			entry, err = sset.Get(newjid)
+			j, _ := entry.Job()
 			assert.NoError(t, err)
-			assert.Equal(t, payload, entry.Value())
+			assert.Equal(t, second, j)
 
-			ok, err := sset.Remove([]byte(newkey))
+			ok, err := sset.Remove(newjid)
 			assert.NoError(t, err)
 			assert.EqualValues(t, 1, sset.Size())
 			assert.True(t, ok)
@@ -98,7 +94,7 @@ func TestSqliteBasicSortedOps(t *testing.T) {
 			assert.EqualValues(t, 0, sset.Size())
 			assert.True(t, ok)
 
-			err = sset.AddElement(tim, newjid, payload)
+			err = sset.AddElement(tim, second)
 			assert.NoError(t, err)
 			assert.EqualValues(t, 1, sset.Size())
 
@@ -138,11 +134,11 @@ func TestSqliteBasicSortedOps(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Equal(t, expectedTypes, actualTypes)
 
-			var jkey []byte
+			var jkey string
 			err = sset.Each(func(idx int, entry SortedEntry) error {
-				k, err := entry.Key()
+				k, err := entry.Job()
 				assert.NoError(t, err)
-				jkey = k
+				jkey = k.Jid
 				return nil
 			})
 			assert.NoError(t, err)
@@ -169,9 +165,9 @@ func TestSqliteBasicSortedOps(t *testing.T) {
 			assert.EqualValues(t, 1, sset.Size())
 
 			err = sset.Each(func(idx int, entry SortedEntry) error {
-				k, err := entry.Key()
+				k, err := entry.Job()
 				assert.NoError(t, err)
-				jkey = k
+				jkey = k.Jid
 				return nil
 			})
 			assert.NoError(t, err)

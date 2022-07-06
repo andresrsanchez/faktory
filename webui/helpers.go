@@ -137,14 +137,8 @@ func uintWithDelimiter(val uint64) string {
 }
 
 func queueJobs(q storage.Queue, count, currentPage uint64, fn func(idx int, key []byte, job *client.Job)) {
-	err := q.Page(int64((currentPage-1)*count), int64(count), func(idx int, data []byte) error {
-		var job client.Job
-		err := json.Unmarshal(data, &job)
-		if err != nil {
-			util.Warnf("Error parsing JSON: %s", string(data))
-			return err
-		}
-		fn(idx, data, &job)
+	err := q.Page(int64((currentPage-1)*count), int64(count), func(idx int, data *client.Job) error {
+		fn(idx, nil, data)
 		return nil
 	})
 	if err != nil {
@@ -180,14 +174,10 @@ func setJobs(set storage.SortedSet, count, currentPage uint64, fn func(idx int, 
 	_, err := set.Page(int((currentPage-1)*count), int(count), func(idx int, entry storage.SortedEntry) error {
 		job, err := entry.Job()
 		if err != nil {
-			util.Warnf("Error parsing JSON: %s", string(entry.Value()))
+			// util.Warnf("Error parsing JSON: %s", string(entry.Value()))
 			return err
 		}
-		key, err := entry.Key()
-		if err != nil {
-			return err
-		}
-		fn(idx, key, job)
+		fn(idx, nil, job)
 		return nil
 	})
 	if err != nil {
@@ -197,14 +187,15 @@ func setJobs(set storage.SortedSet, count, currentPage uint64, fn func(idx int, 
 
 func busyReservations(req *http.Request, fn func(worker *manager.Reservation)) {
 	err := ctx(req).Store().Working().Each(func(idx int, entry storage.SortedEntry) error {
-		var res manager.Reservation
-		err := json.Unmarshal(entry.Value(), &res)
-		if err != nil {
-			util.Error("Cannot unmarshal reservation", err)
-		} else {
-			fn(&res)
-		}
-		return err
+		// var res manager.Reservation
+		// err := json.Unmarshal(entry.Value(), &res)
+		// if err != nil {
+		// 	util.Error("Cannot unmarshal reservation", err)
+		// } else {
+		// 	fn(&res)
+		// }
+		// return err
+		return nil
 	})
 	if err != nil {
 		util.Error("Error iterating reservations", err)
@@ -232,11 +223,12 @@ func actOn(req *http.Request, set storage.SortedSet, action string, keys []strin
 			return set.Clear()
 		} else {
 			for idx := range keys {
-				_, err := set.Remove([]byte(keys[idx]))
-				// ok doesn't really matter
-				if err != nil {
-					return err
-				}
+				// _, err := set.Remove([]byte(keys[idx]))
+				// // ok doesn't really matter
+				// if err != nil {
+				// 	return err
+				// }
+				fmt.Println(idx)
 			}
 			return nil
 		}
@@ -244,12 +236,12 @@ func actOn(req *http.Request, set storage.SortedSet, action string, keys []strin
 		if len(keys) == 1 && keys[0] == "all" {
 			return ctx(req).Store().EnqueueAll(set)
 		} else {
-			for idx := range keys {
-				err := ctx(req).Store().EnqueueFrom(set, []byte(keys[idx]))
-				if err != nil {
-					return err
-				}
-			}
+			// for idx := range keys {
+			// 	err := ctx(req).Store().EnqueueFrom(set, []byte(keys[idx]))
+			// 	if err != nil {
+			// 		return err
+			// 	}
+			// }
 			return nil
 		}
 	case "kill":
@@ -258,19 +250,19 @@ func actOn(req *http.Request, set storage.SortedSet, action string, keys []strin
 		} else {
 			// TODO Make this 180 day dead job expiry dynamic per-job or
 			// a global variable in TOML? PRs welcome.
-			expiry := time.Now().Add(180 * 24 * time.Hour)
-			for idx := range keys {
-				entry, err := set.Get([]byte(keys[idx]))
-				if err != nil {
-					return err
-				}
-				if entry != nil {
-					err = set.MoveTo(ctx(req).Store().Dead(), entry, expiry)
-					if err != nil {
-						return err
-					}
-				}
-			}
+			// expiry := time.Now().Add(180 * 24 * time.Hour)
+			// for idx := range keys {
+			// 	entry, err := set.Get([]byte(keys[idx]))
+			// 	if err != nil {
+			// 		return err
+			// 	}
+			// 	if entry != nil {
+			// 		err = set.MoveTo(ctx(req).Store().Dead(), entry, expiry)
+			// 		if err != nil {
+			// 			return err
+			// 		}
+			// 	}
+			// }
 			return nil
 		}
 	default:

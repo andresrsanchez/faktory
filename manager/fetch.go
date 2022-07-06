@@ -2,8 +2,6 @@ package manager
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -11,7 +9,7 @@ import (
 	"github.com/contribsys/faktory/storage"
 	"github.com/contribsys/faktory/util"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 var (
@@ -134,7 +132,6 @@ type BasicFetch struct {
 }
 
 type simpleLease struct {
-	payload  []byte
 	job      *client.Job
 	released bool
 }
@@ -144,26 +141,10 @@ func (el *simpleLease) Release() error {
 	return nil
 }
 
-func (el *simpleLease) Payload() []byte {
-	return el.payload
-}
-
 func (el *simpleLease) Job() (*client.Job, error) {
-	if el.job != nil {
-		return el.job, nil
-	}
-	if el.payload == nil {
-		return nil, nil
-	}
 	if el.job == nil {
-		var job client.Job
-		err := json.Unmarshal(el.payload, &job)
-		if err != nil {
-			return nil, fmt.Errorf("cannot unmarshal job payload: %w", err)
-		}
-		el.job = &job
+		panic(fmt.Errorf("nil job o lease"))
 	}
-
 	return el.job, nil
 }
 
@@ -181,12 +162,12 @@ func (f *BasicFetch) Fetch(ctx context.Context, wid string, queues ...string) (L
 		return nil, err
 	}
 	if data != nil {
-		return &simpleLease{payload: data}, nil
+		return &simpleLease{job: data}, nil
 	}
 	return Nothing, nil
 }
 
-func brpop(store storage.Store, queues []interface{}) ([]byte, error) { //empty queues?
+func brpop(store storage.Store, queues []interface{}) (*client.Job, error) { //empty queues?
 	if len(queues) == 0 {
 		return nil, nil
 	}
@@ -195,7 +176,6 @@ func brpop(store storage.Store, queues []interface{}) ([]byte, error) { //empty 
 	query := "select name from queues"
 	rows, err := db.Query(query, queues...)
 	if err != nil {
-		fmt.Println("im selectin")
 		return nil, err
 	}
 	rqueues := make(map[string]bool)
@@ -212,15 +192,12 @@ func brpop(store storage.Store, queues []interface{}) ([]byte, error) { //empty 
 		return nil, nil
 	}
 
-	query = `delete from jobs where id = (select id from jobs limit 1) returning jid, queue, jobtype, args, created_at, at, enqueued_at, 
-	retry, reserve_for, backtrace, retry_count, remaining, failed_at, next_at, err_msg, err_type, fbacktrace`
 	timeout := time.After(2 * time.Second)
 	var i int
-	var r []byte
 	for {
 		select {
 		case <-timeout:
-			return r, nil
+			return nil, nil
 		default:
 			if i == len(rqueues) {
 				i = 0
@@ -228,45 +205,20 @@ func brpop(store storage.Store, queues []interface{}) ([]byte, error) { //empty 
 			name := queues[i].(string)
 			if _, ok := rqueues[name]; !ok {
 				i++
-				fmt.Println("not present")
 				continue
 			}
 			queue, err := store.GetQueue(name)
 			if err != nil {
-				fmt.Println("im getting the q")
 				continue
 			}
 			data, err := queue.Pop()
 			if err != nil {
-				fmt.Println("im popping")
+				continue
+			} else if data == nil {
+				i++
+				continue
 			}
 			return data, err
 		}
 	}
-}
-
-func ScanJob(row *sql.Row) (*client.Job, error) {
-	j := &client.Job{Failure: &client.Failure{}}
-	var args string
-	var created, enqueue, at, failed, next, msg, etype, fbacktrace sql.NullString
-	var reserve, retry, rcount, remaining, trace sql.NullInt32
-	err := row.Scan(&j.Jid, &j.Queue, &j.Type, &args, &created, &at, &enqueue, &retry, &reserve, &trace, &rcount, &remaining, &failed, &next, &msg, &etype, &fbacktrace)
-	if err != nil {
-		return nil, err
-	}
-	json.Unmarshal([]byte(args), &j.Args)
-	j.CreatedAt = created.String
-	j.EnqueuedAt = enqueue.String
-	j.At = at.String
-	//*j.Retry = int(retry.Int32)
-	j.ReserveFor = int(reserve.Int32)
-	j.Backtrace = int(trace.Int32)
-	j.Failure.RetryCount = int(rcount.Int32)
-	j.Failure.RetryRemaining = int(remaining.Int32)
-	j.Failure.FailedAt = failed.String
-	j.Failure.NextAt = next.String
-	j.Failure.ErrorMessage = msg.String
-	j.Failure.ErrorType = etype.String
-	//j.Failure.Backtrace = fbacktrace
-	return j, nil
 }
