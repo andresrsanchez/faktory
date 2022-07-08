@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/contribsys/faktory/client"
 	"github.com/contribsys/faktory/util"
@@ -92,9 +93,15 @@ func NewSqliteStore(name string) (Store, error) {
 	}
 	q := `
 	create table if not exists queues (
-		id integer not null primary key,
+		id integer primary key,
 		name text not null,
-		status int default 1 not null)`
+		status int default 1 not null);
+	create table if not exists history (
+		id integer primary key,
+		name text not null,
+		date date default (date('now')),
+		count int not null default 1
+	);`
 	_, err = db.Exec(q)
 	if err != nil {
 		return nil, err
@@ -113,6 +120,10 @@ func NewSqliteStore(name string) (Store, error) {
 		ss.queueSet[name] = q
 	}
 	return ss, nil
+}
+
+func (ss *sqliteStore) Sqlite() *sql.DB {
+	return ss.db
 }
 
 func (ss *sqliteStore) initSorted() error {
@@ -187,11 +198,8 @@ func (store *sqliteStore) EachQueue(x func(Queue)) {
 }
 
 func (store *sqliteStore) Flush() error {
-	_, err := store.db.Exec("delete * from queues")
-	if err != nil {
-		return err
-	}
-	return os.RemoveAll("./db")
+	_, err := store.db.Exec("delete from queues")
+	return err
 }
 
 func (store *sqliteStore) ExistingQueue(name string) (Queue, bool) {
@@ -333,20 +341,65 @@ func (store *sqliteStore) EnqueueFrom(sset SortedSet, key []byte) error {
 }
 
 func (store *sqliteStore) Success() error {
-	return nil
+	_, err := store.db.Exec("insert into history(name) values (?) on conflict(name,date) do update set count=count+1", "processed")
+	return err
 }
-func (store *sqliteStore) TotalProcessed() uint64 {
-	return 0
+func (store *sqliteStore) TotalProcessed() (r uint64) {
+	store.db.QueryRow("select count(1) from history where name=? and date=date('now')", "processed").Scan(&r)
+	return
 }
-func (store *sqliteStore) TotalFailures() uint64 {
-	return 0
+func (store *sqliteStore) TotalFailures() (r uint64) {
+	store.db.QueryRow("select count(1) from history where name=? and date=date('now')", "failures").Scan(&r)
+	return
 }
 func (store *sqliteStore) Failure() error {
-	return nil
+	_, err := store.db.Exec("insert into history(name) values (?),(?) on conflict(name,date) do update set count=count+1", "failures", "processed")
+	return err
 }
+
 func (store *sqliteStore) History(days int, fn func(day string, procCnt uint64, failCnt uint64)) error {
+	before := time.Now().AddDate(0, 0, -days)
+	daystrs := make([]string, days)
+	fails := make([]int, days)
+	procds := make([]int, days)
+	rows, err := store.db.Query("select name, count, date from history where date > ?", before.Format("2006-01-02"))
+	if err != nil {
+		return err
+	}
+	var lastdate string
+	for rows.Next() {
+		var name, date string
+		var count int
+		err := rows.Scan(&name, &count, &date)
+		if err != nil {
+			continue
+		}
+		if date != lastdate {
+			daystrs = append(daystrs, date)
+		}
+		if name == "processed" {
+			procds = append(procds, count)
+		} else {
+			fails = append(fails, count)
+		}
+	}
+	for idx := 0; idx < days; idx++ {
+		fn(daystrs[idx], uint64(procds[idx]), uint64(fails[idx]))
+	}
 	return nil
 }
 func (s *sqliteStore) Raw() KV {
+	return nil
+}
+
+func openSqlite(string, int) (Store, error) {
+	return NewSqliteStore("db")
+}
+
+func bootSqlite(string, string) (func(), error) {
+	return func() {}, nil
+}
+
+func stopSqlite(string) error {
 	return nil
 }

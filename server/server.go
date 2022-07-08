@@ -19,7 +19,6 @@ import (
 	"github.com/contribsys/faktory/manager"
 	"github.com/contribsys/faktory/storage"
 	"github.com/contribsys/faktory/util"
-	"github.com/go-redis/redis"
 )
 
 type RuntimeStats struct {
@@ -339,26 +338,17 @@ func (s *Server) uptimeInSeconds() int {
 }
 
 func (s *Server) CurrentState() (map[string]interface{}, error) {
-	queueCmd := map[string]*redis.IntCmd{}
-	_, err := s.store.Redis().Pipelined(func(pipe redis.Pipeliner) error {
-		s.store.EachQueue(func(q storage.Queue) {
-			queueCmd[q.Name()] = pipe.LLen(q.Name())
-		})
-		return nil
+	queueCmd := map[string]uint64{}
+	s.store.EachQueue(func(q storage.Queue) {
+		queueCmd[q.Name()] = q.Size()
 	})
-	if err != nil {
-		return nil, err
-	}
-
 	queues := map[string]int64{}
 	totalQueued := int64(0)
 	totalQueues := len(queueCmd)
-	for name, cmd := range queueCmd {
-		qsize := cmd.Val()
-		totalQueued += qsize
-		queues[name] = qsize
+	for name, count := range queueCmd {
+		totalQueued += int64(count)
+		queues[name] = int64(count)
 	}
-
 	return map[string]interface{}{
 		"now":             util.Nows(),
 		"server_utc_time": time.Now().UTC().Format("15:04:05 UTC"),
@@ -380,3 +370,46 @@ func (s *Server) CurrentState() (map[string]interface{}, error) {
 		},
 	}, nil
 }
+
+// func (s *Server) CurrentState() (map[string]interface{}, error) {
+// 	queueCmd := map[string]*redis.IntCmd{}
+// 	_, err := s.store.Redis().Pipelined(func(pipe redis.Pipeliner) error {
+// 		s.store.EachQueue(func(q storage.Queue) {
+// 			queueCmd[q.Name()] = pipe.LLen(q.Name())
+// 		})
+// 		return nil
+// 	})
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	queues := map[string]int64{}
+// 	totalQueued := int64(0)
+// 	totalQueues := len(queueCmd)
+// 	for name, cmd := range queueCmd {
+// 		qsize := cmd.Val()
+// 		totalQueued += qsize
+// 		queues[name] = qsize
+// 	}
+
+// 	return map[string]interface{}{
+// 		"now":             util.Nows(),
+// 		"server_utc_time": time.Now().UTC().Format("15:04:05 UTC"),
+// 		"faktory": map[string]interface{}{
+// 			"total_failures":  s.store.TotalFailures(),
+// 			"total_processed": s.store.TotalProcessed(),
+// 			"total_enqueued":  totalQueued,
+// 			"total_queues":    totalQueues,
+// 			"queues":          queues,
+// 			"tasks":           s.taskRunner.Stats(),
+// 		},
+// 		"server": map[string]interface{}{
+// 			"description":     client.Name,
+// 			"faktory_version": client.Version,
+// 			"uptime":          s.uptimeInSeconds(),
+// 			"connections":     atomic.LoadUint64(&s.Stats.Connections),
+// 			"command_count":   atomic.LoadUint64(&s.Stats.Commands),
+// 			"used_memory_mb":  util.MemoryUsageMB(),
+// 		},
+// 	}, nil
+// }

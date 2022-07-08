@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/contribsys/faktory/client"
@@ -61,7 +62,48 @@ func (ss *sqliteSorted) Get(key []byte) (SortedEntry, error) {
 }
 
 func (ss *sqliteSorted) Find(match string, fn func(index int, e SortedEntry) error) error {
-	return fmt.Errorf("not implemented booo")
+	if match == "-" {
+		return fmt.Errorf("not supported filter: %s", match)
+	}
+	weird := struct {
+		Jids    []interface{} `json:"jids,omitempty"`
+		Jobtype string        `json:"jobtype,omitempty"`
+	}{}
+	var builder strings.Builder
+	builder.WriteString("select jid, queue, jobtype, args, created_at, at, retry from jobs where 1 ")
+	if match != "*" {
+		err := json.Unmarshal([]byte(match), &weird)
+		if err != nil {
+			return err
+		}
+		if len(weird.Jids) > 0 {
+			builder.WriteString("and jid in (?")
+			builder.WriteString(strings.Repeat(",?", len(weird.Jids)-1))
+			builder.WriteString(")")
+		}
+		if weird.Jobtype != "" {
+			builder.WriteString("and jobtype=?")
+			weird.Jids = append(weird.Jids, weird.Jobtype)
+		}
+	}
+	rows, err := ss.db.Query(builder.String(), weird.Jids...)
+	if err != nil {
+		return err
+	}
+	var idx int
+	for rows.Next() {
+		var j client.Job
+		var args string
+		err = rows.Scan(&j.Jid, &j.Queue, &j.Type, &args, &j.CreatedAt, &j.At, &j.Retry)
+		if err != nil {
+			continue
+		}
+		err = fn(idx, NewDummyEntry(&j))
+		if err != nil {
+			continue
+		}
+	}
+	return err
 }
 
 func (ss *sqliteSorted) Page(start int, count int, fn func(index int, e SortedEntry) error) (int, error) {
@@ -129,12 +171,8 @@ func (ss *sqliteSorted) RemoveBefore(timestamp string, maxCount int64, fn func(d
 	if err != nil {
 		return 0, err
 	}
-	q := `DELETE FROM jobs
-	WHERE id in
-	(
-	  SELECT id from jobs where name =? and time <= ? LIMIT ?
-	)`
-	lol, err := ss.db.Exec(q, ss.name, tim, maxCount)
+	q := "delete from jobs where id in(select id from jobs where at <= ? limit ?)"
+	lol, err := ss.db.Exec(q, tim, maxCount)
 	if err != nil {
 		return 0, err
 	}

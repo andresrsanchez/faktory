@@ -25,4 +25,4 @@ vendor/
 /coverage.html
 tags
 
-storage/db
+*/db

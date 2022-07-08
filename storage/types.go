@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/contribsys/faktory/client"
@@ -41,6 +42,7 @@ type Store interface {
 
 	Raw() KV
 	Redis
+	Sqlite() *sql.DB
 }
 
 type Redis interface {

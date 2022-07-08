@@ -3,6 +3,7 @@ package storage
 import (
 	"bufio"
 	"bytes"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -292,6 +293,10 @@ func (store *redisStore) GetQueue(name string) (Queue, error) {
 	return q, nil
 }
 
+func (store *redisStore) Sqlite() *sql.DB {
+	return nil
+}
+
 func (store *redisStore) Close() error {
 	util.Debug("Stopping storage")
 	store.mu.Lock()
@@ -420,10 +425,16 @@ func (store *redisStore) EnqueueFrom(sset SortedSet, key []byte) error {
 	return q.Add(job)
 }
 
+// var (
+// 	Open = openRedis
+// 	Boot = bootRedis
+// 	Stop = stopRedis
+// )
+
 var (
-	Open = openRedis
-	Boot = bootRedis
-	Stop = stopRedis
+	Open = openSqlite
+	Boot = bootSqlite
+	Stop = stopSqlite
 )
 
 const (

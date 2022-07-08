@@ -17,6 +17,7 @@ import (
 )
 
 func runServer(binding string, runner func()) {
+	os.RemoveAll("./db")
 	dir := fmt.Sprintf("/tmp/%s", strings.Replace(binding, ":", "_", 1))
 	defer os.RemoveAll(dir)
 

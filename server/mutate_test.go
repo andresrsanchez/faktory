@@ -30,6 +30,7 @@ func TestMutateCommands(t *testing.T) {
 		assert.NoError(t, err)
 
 		j = faktory.NewJob("SomeJob", "truid:67123", 3)
+		jid := j.Jid
 		j.At = util.Thens(time.Now().Add(10 * time.Second))
 		err = cl.Push(j)
 		assert.NoError(t, err)
@@ -53,7 +54,7 @@ func TestMutateCommands(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, 4, hash["faktory"].(map[string]interface{})["tasks"].(map[string]interface{})["Scheduled"].(map[string]interface{})["size"])
 
-		err = cl.Discard(faktory.Scheduled, faktory.OfType("SomeJob").Matching("*uid:67123*"))
+		err = cl.Discard(faktory.Scheduled, faktory.OfType("SomeJob").WithJids(jid))
 		assert.NoError(t, err)
 
 		hash, err = cl.Info()

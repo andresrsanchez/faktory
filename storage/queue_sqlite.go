@@ -200,7 +200,7 @@ func (store *sqliteStore) NewQueue(name string) (*sqliteQueue, error) {
 	}
 	_, err = store.db.Exec("insert into queues(name) values(?)", name)
 	if err != nil {
-		os.Remove(name)
+		os.Remove(name) //review
 	}
 	sq := &sqliteQueue{
 		name:  name,

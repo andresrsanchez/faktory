@@ -2,13 +2,17 @@ package manager
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/contribsys/faktory/client"
 	"github.com/contribsys/faktory/util"
-	"github.com/go-redis/redis"
+
+	_ "modernc.org/sqlite"
 )
 
 var (
@@ -85,7 +89,6 @@ func (m *manager) Fetch(ctx context.Context, wid string, queues ...string) (*cli
 	if len(queues) == 0 {
 		return nil, fmt.Errorf("must call fetch with at least one queue")
 	}
-
 restart:
 	activeQueues := filter(m.paused, queues)
 	if len(activeQueues) == 0 {
@@ -96,7 +99,6 @@ restart:
 		}
 		return nil, nil
 	}
-
 	lease, err := m.fetcher.Fetch(ctx, wid, activeQueues...)
 	if err != nil {
 		return nil, err
@@ -130,7 +132,7 @@ type Fetcher interface {
 }
 
 type BasicFetch struct {
-	r *redis.Client
+	r *sql.DB
 }
 
 type simpleLease struct {
@@ -167,12 +169,16 @@ func (el *simpleLease) Job() (*client.Job, error) {
 	return el.job, nil
 }
 
-func BasicFetcher(r *redis.Client) Fetcher {
+func BasicFetcher(r *sql.DB) Fetcher {
 	return &BasicFetch{r: r}
 }
 
 func (f *BasicFetch) Fetch(ctx context.Context, wid string, queues ...string) (Lease, error) {
-	data, err := brpop(f.r, queues...)
+	var weird []interface{}
+	for _, v := range queues {
+		weird = append(weird, v)
+	}
+	data, err := brpop(f.r, weird)
 	if err != nil {
 		return nil, err
 	}
@@ -182,13 +188,45 @@ func (f *BasicFetch) Fetch(ctx context.Context, wid string, queues ...string) (L
 	return Nothing, nil
 }
 
-func brpop(r *redis.Client, queues ...string) ([]byte, error) {
-	val, err := r.BRPop(2*time.Second, queues...).Result()
+func brpop(db *sql.DB, queues []interface{}) ([]byte, error) { //empty queues?
+	query := "select name from queues where name in (?" + strings.Repeat(",?", len(queues)-1) + ")"
+	rows, err := db.Query(query, queues...)
 	if err != nil {
-		if err == redis.Nil {
-			return nil, nil
-		}
 		return nil, err
 	}
-	return []byte(val[1]), nil
+	var rqueues []string
+	for rows.Next() {
+		var name string
+		err := rows.Scan(&name)
+		if err != nil {
+			continue
+		}
+		rqueues = append(rqueues, name)
+	}
+	query = "delete from jobs where id = (select id from jobs limit 1) returning jid, queue, jobtype, args, created_at, at, retry, enqueued_at"
+	var j client.Job
+	var args string
+	var enq, at sql.NullString
+	for _, q := range rqueues {
+		queue, err := sql.Open("sqlite", filepath.Join("db", q))
+		if err != nil {
+			continue
+		}
+		err = queue.QueryRow(query).Scan(&j.Jid, &j.Queue, &j.Type, &args, &j.CreatedAt, &at, &j.Retry, &enq)
+		queue.Close()
+		if err != nil {
+			if err == sql.ErrNoRows {
+				continue
+			}
+			return nil, err
+		}
+		j.EnqueuedAt = enq.String
+		j.At = at.String
+		err = json.Unmarshal([]byte(args), &j.Args)
+		if err != nil {
+			continue
+		}
+		return json.Marshal(j)
+	}
+	return nil, nil
 }

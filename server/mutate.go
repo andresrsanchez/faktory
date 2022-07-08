@@ -22,12 +22,12 @@ func mutateKill(store storage.Store, op client.Operation) error {
 	if ss == nil {
 		return fmt.Errorf("invalid target for mutation command")
 	}
-	match, matchfn := matchForFilter(op.Filter)
+	match, _ := matchForFilter(op.Filter)
 	return ss.Find(match, func(idx int, ent storage.SortedEntry) error {
-		if matchfn(string(ent.Value())) {
-			return ss.MoveTo(store.Dead(), ent, time.Now().Add(manager.DeadTTL))
-		}
-		return nil
+		// if matchfn(string(ent.Value())) {
+		return ss.MoveTo(store.Dead(), ent, time.Now().Add(manager.DeadTTL))
+		// }
+		// return nil
 	})
 }
 
@@ -36,24 +36,24 @@ func mutateRequeue(store storage.Store, op client.Operation) error {
 	if ss == nil {
 		return fmt.Errorf("invalid target for mutation command")
 	}
-	match, matchfn := matchForFilter(op.Filter)
+	match, _ := matchForFilter(op.Filter)
 	return ss.Find(match, func(idx int, ent storage.SortedEntry) error {
-		if matchfn(string(ent.Value())) {
-			j, err := ent.Job()
-			if err != nil {
-				return err
-			}
-			q, err := store.GetQueue(j.Queue)
-			if err != nil {
-				return err
-			}
-			err = q.Push(ent.Value())
-			if err != nil {
-				return err
-			}
-			return ss.RemoveEntry(ent)
+		//if matchfn(string(ent.Value())) {
+		j, err := ent.Job()
+		if err != nil {
+			return err
 		}
-		return nil
+		q, err := store.GetQueue(j.Queue)
+		if err != nil {
+			return err
+		}
+		err = q.Push(ent.Value())
+		if err != nil {
+			return err
+		}
+		return ss.RemoveEntry(ent)
+		//}
+		//return nil
 	})
 }
 
@@ -65,12 +65,12 @@ func mutateDiscard(store storage.Store, op client.Operation) error {
 	if op.Filter == nil {
 		return ss.Clear()
 	}
-	match, matchfn := matchForFilter(op.Filter)
+	match, _ := matchForFilter(op.Filter)
 	return ss.Find(match, func(idx int, ent storage.SortedEntry) error {
-		if matchfn(string(ent.Value())) {
-			return ss.RemoveEntry(ent)
-		}
-		return nil
+		// if matchfn(string(ent.Value())) {
+		return ss.RemoveEntry(ent)
+		//}
+		//return nil
 	})
 }
 
@@ -78,35 +78,14 @@ func matchForFilter(filter *client.JobFilter) (string, func(value string) bool) 
 	if filter == nil {
 		return "*", AlwaysMatch
 	}
-
 	if filter.Regexp != "" {
-		if filter.Jobtype == "" {
-			return filter.Regexp, AlwaysMatch
-		} else {
-			// if a regexp and jobtype, pass the regexp to Redis and match jobtype
-			// here
-			typematch := fmt.Sprintf(`"jobtype":%q`, filter.Jobtype)
-			return filter.Regexp, func(value string) bool {
-				return strings.Index(value, typematch) > 0
-			}
-		}
+		return "-", AlwaysMatch
 	}
-
-	if filter.Jobtype != "" {
-		return fmt.Sprintf(`*"jobtype":%q*`, filter.Jobtype), AlwaysMatch
+	data, err := json.Marshal(filter)
+	if err != nil {
+		return "-", AlwaysMatch
 	}
-
-	if len(filter.Jids) > 0 {
-		return "*", func(value string) bool {
-			for idx := range filter.Jids {
-				if strings.Index(value, fmt.Sprintf(`"jid":%q`, filter.Jids[idx])) > 0 {
-					return true
-				}
-			}
-			return false
-		}
-	}
-	return "*", AlwaysMatch
+	return string(data), AlwaysMatch
 }
 
 func mutate(c *Connection, s *Server, cmd string) {
