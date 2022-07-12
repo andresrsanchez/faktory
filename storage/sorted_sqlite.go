@@ -167,16 +167,39 @@ func (ss *sqliteSorted) delete(jid string) error {
 }
 
 func (ss *sqliteSorted) RemoveBefore(timestamp string, maxCount int64, fn func(data []byte) error) (int64, error) {
-	tim, err := util.ParseTime(timestamp)
+	_, err := util.ParseTime(timestamp)
 	if err != nil {
 		return 0, err
 	}
-	q := "delete from jobs where id in(select id from jobs where at <= ? limit ?)"
-	lol, err := ss.db.Exec(q, tim, maxCount)
+	q := `delete from jobs where id in(select id from jobs where at <= ? limit ?) returning
+jid, queue, jobtype, args, created_at, enqueued_at, at, retry, backtrace, reserve_for, retry_count, remaining, failed_at, next_at, err_msg, err_type, fbacktrace, reserved_at, expires_at, wid`
+	rows, err := ss.db.Query(q, timestamp, maxCount)
 	if err != nil {
 		return 0, err
 	}
-	return lol.RowsAffected()
+	var jobs [][]byte
+	for rows.Next() {
+		j, err := scanThing(rows)
+		if err != nil {
+			continue
+		}
+		data, err := json.Marshal(j)
+		if err != nil {
+			continue
+		}
+		jobs = append(jobs, data)
+	}
+	rows.Close()
+	var count int64
+	for _, job := range jobs {
+		err = fn(job)
+		if err != nil {
+			util.Warnf("Unable to process timed job: %v", err)
+			continue
+		}
+		count++
+	}
+	return count, nil
 }
 func (ss *sqliteSorted) MoveTo(sset SortedSet, entry SortedEntry, newtime time.Time) error {
 	jid, err := entry.Key()

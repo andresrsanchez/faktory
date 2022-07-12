@@ -106,6 +106,11 @@ func NewSqliteStore(name string) (Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	_, err = db.Exec("CREATE UNIQUE INDEX name_date ON history(name, date);")
+	if err != nil {
+		return nil, err
+	}
+
 	rows, err := db.Query("select name from queues")
 	if err != nil {
 		return nil, err
@@ -182,44 +187,81 @@ func (ss *sqliteStore) initSorted() error {
 	return err
 }
 
-func scanJob(row *sql.Row) (*client.Job, error) {
-	var id int
-	var j client.Job
+func ScanJob(rows *sql.Rows) (*client.Job, error) {
+	j := &client.Job{Failure: &client.Failure{}}
 	var args string
-	var created, enqueue, at, reserved, expires, wid, failed, next, msg, jtype, trace sql.NullString
-	var reserve, retry, rcount, remaining sql.NullInt32
-	err := row.Scan(&id, &j.Jid, &j.Queue, &j.Type, &args, &created, &enqueue, &at, &retry, &reserved, &expires, &wid, &reserve, &rcount, &remaining, &failed, &next, &msg, &jtype, &trace)
+	var created, enqueue, at, failed, next, msg, etype, fbacktrace sql.NullString
+	var reserve, retry, rcount, remaining, trace sql.NullInt32
+	err := rows.Scan(&j.Jid, &j.Queue, &j.Type, &args, &created, &at, &enqueue, &retry, &reserve, &trace, &rcount, &remaining, &failed, &next, &msg, &etype, &fbacktrace)
 	if err != nil {
 		return nil, err
 	}
-	err = json.Unmarshal([]byte(args), &j.Args)
-	if err != nil {
-		return nil, err
-	}
+	json.Unmarshal([]byte(args), &j.Args)
+	j.CreatedAt = created.String
 	j.EnqueuedAt = enqueue.String
 	j.At = at.String
-	*j.Retry = int(retry.Int32)
-	// j.rese
-	return &j, nil
-	// id integer not null primary key,
-	// 	jid text not null unique,
-	// 	queue text not null,
-	// 	jobtype text not null,
-	// 	args text not null,
-	// 	created_at datetime not null,
-	// 	enqueued_at datetime,
-	// 	at datetime not null,
-	// 	retry integer,
-	// 	reserved_at datetime,
-	// 	expires_at datetime,
-	// 	wid text,
-	// 	retry_count int,
-	// 	remaining int,
-	// 	failed_at datetime,
-	// 	next_at datetime,
-	// 	err_msg text,
-	// 	err_tpe text,
-	// 	backtrace text
+	//*j.Retry = int(retry.Int32)
+	j.ReserveFor = int(reserve.Int32)
+	j.Backtrace = int(trace.Int32)
+	j.Failure.RetryCount = int(rcount.Int32)
+	j.Failure.RetryRemaining = int(remaining.Int32)
+	j.Failure.FailedAt = failed.String
+	j.Failure.NextAt = next.String
+	j.Failure.ErrorMessage = msg.String
+	j.Failure.ErrorType = etype.String
+	//j.Failure.Backtrace = fbacktrace
+	return j, nil
+}
+
+func scanThing(rows *sql.Rows) (interface{}, error) {
+	j := struct {
+		Jid              string        `json:"jid"`
+		Queue            string        `json:"queue"`
+		Type             string        `json:"jobtype"`
+		Args             []interface{} `json:"args"`
+		CreatedAt        string        `json:"created_at,omitempty"`
+		EnqueuedAt       string        `json:"enqueued_at,omitempty"`
+		At               string        `json:"at,omitempty"`
+		ReserveFor       int           `json:"reserve_for,omitempty"`
+		Retry            *int          `json:"retry"`
+		Backtrace        int           `json:"backtrace,omitempty"`
+		RetryCount       int           `json:"retry_count"`
+		RetryRemaining   int           `json:"remaining"`
+		FailedAt         string        `json:"failed_at"`
+		NextAt           string        `json:"next_at,omitempty"`
+		ErrorMessage     string        `json:"message,omitempty"`
+		ErrorType        string        `json:"errtype,omitempty"`
+		FailureBacktrace []string      `json:"fbacktrace,omitempty"`
+		Since            string        `json:"reserved_at"`
+		Expiry           string        `json:"expires_at"`
+		Wid              string        `json:"wid"`
+	}{}
+	var args string
+	var created, enqueue, at, failed, next, msg, etype, fbacktrace, since, expiry, wid sql.NullString
+	var reserve, retry, rcount, remaining, trace sql.NullInt32
+	err := rows.Scan(&j.Jid, &j.Queue, &j.Type, &args, &created, &at, &enqueue, &retry, &reserve, &trace, &rcount, &remaining, &failed, &next, &msg, &etype, &fbacktrace, &since, &expiry, &wid)
+	if err != nil {
+		return nil, err
+	}
+	json.Unmarshal([]byte(args), &j.Args)
+	j.CreatedAt = created.String
+	j.EnqueuedAt = enqueue.String
+	j.At = at.String
+	//*j.Retry = int(retry.Int32)
+	j.ReserveFor = int(reserve.Int32)
+	j.Backtrace = int(trace.Int32)
+	j.RetryCount = int(rcount.Int32)
+	j.RetryRemaining = int(remaining.Int32)
+	j.FailedAt = failed.String
+	j.NextAt = next.String
+	j.ErrorMessage = msg.String
+	j.ErrorType = etype.String
+	//j.Failure.Backtrace = fbacktrace
+	j.Since = since.String
+	j.Expiry = expiry.String
+	j.Wid = wid.String
+
+	return j, nil
 }
 
 func (store *sqliteStore) Stats() map[string]string {

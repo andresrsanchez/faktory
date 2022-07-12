@@ -11,7 +11,7 @@ import (
 )
 
 func TestLoadWorkingSet(t *testing.T) {
-	withRedis(t, "working", func(t *testing.T, store storage.Store) {
+	withSqlite(t, "working", func(t *testing.T, store storage.Store) {
 		t.Run("LoadWorkingSet", func(t *testing.T) {
 			store.Flush()
 			m := newManager(store)
@@ -144,7 +144,6 @@ func TestLoadWorkingSet(t *testing.T) {
 
 			err = m.ExtendReservation("nosuch", time.Now().Add(50*time.Hour))
 			assert.NoError(t, err)
-
 			util.LogInfo = true
 			util.LogDebug = true
 			util.Infof("Extending %s", job.Jid)

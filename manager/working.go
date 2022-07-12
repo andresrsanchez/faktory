@@ -82,8 +82,7 @@ func (m *manager) loadWorkingSet() error {
 
 	addedCount := 0
 	err := m.store.Working().Each(func(idx int, entry storage.SortedEntry) error {
-		var res Reservation
-		err := json.Unmarshal(entry.Value(), &res)
+		res, err := unmarshalReservation(entry.Value())
 		if err != nil {
 			//  We can't return an error here, this method is best effort
 			// as we are booting the server. We can't allow corrupted data
@@ -91,7 +90,7 @@ func (m *manager) loadWorkingSet() error {
 			util.Error("Unable to restore working job", err)
 			return nil
 		}
-		m.workingMap[res.Job.Jid] = &res
+		m.workingMap[res.Job.Jid] = res
 		addedCount++
 		return nil
 	})
@@ -136,12 +135,11 @@ func (m *manager) reserve(wid string, lease Lease) error {
 		tsince:  now,
 		texpiry: exp,
 	}
-
+	res.Job.At = res.Expiry //what the actual fuck
 	data, err := res.marshal()
 	if err != nil {
 		return fmt.Errorf("cannot marshal reservation payload: %w", err)
 	}
-
 	err = m.store.Working().AddElement(res.Expiry, job.Jid, data)
 	if err != nil {
 		return fmt.Errorf("cannot add element in the working set: %w", err)
@@ -209,6 +207,63 @@ func (r *Reservation) marshal() ([]byte, error) {
 	return data, err
 }
 
+func unmarshalReservation(data []byte) (*Reservation, error) {
+	gross := struct {
+		Jid              string        `json:"jid"`
+		Queue            string        `json:"queue"`
+		Type             string        `json:"jobtype"`
+		Args             []interface{} `json:"args"`
+		CreatedAt        string        `json:"created_at,omitempty"`
+		EnqueuedAt       string        `json:"enqueued_at,omitempty"`
+		At               string        `json:"at,omitempty"`
+		ReserveFor       int           `json:"reserve_for,omitempty"`
+		Retry            *int          `json:"retry"`
+		Backtrace        int           `json:"backtrace,omitempty"`
+		RetryCount       int           `json:"retry_count"`
+		RetryRemaining   int           `json:"remaining"`
+		FailedAt         string        `json:"failed_at"`
+		NextAt           string        `json:"next_at,omitempty"`
+		ErrorMessage     string        `json:"message,omitempty"`
+		ErrorType        string        `json:"errtype,omitempty"`
+		FailureBacktrace []string      `json:"fbacktrace,omitempty"`
+		Since            string        `json:"reserved_at"`
+		Expiry           string        `json:"expires_at"`
+		Wid              string        `json:"wid"`
+	}{}
+	err := json.Unmarshal(data, &gross)
+	if err != nil {
+		return nil, err
+	}
+	r := &Reservation{
+		Job: &client.Job{
+			Jid:        gross.Jid,
+			Queue:      gross.Queue,
+			Type:       gross.Type,
+			Args:       gross.Args,
+			CreatedAt:  gross.CreatedAt,
+			EnqueuedAt: gross.EnqueuedAt,
+			At:         gross.At,
+			ReserveFor: gross.ReserveFor,
+			Retry:      gross.Retry,
+			Backtrace:  gross.Backtrace,
+			Failure: &client.Failure{
+				RetryCount:     gross.RetryCount,
+				RetryRemaining: gross.RetryRemaining,
+				FailedAt:       gross.FailedAt,
+				NextAt:         gross.NextAt,
+				ErrorMessage:   gross.ErrorMessage,
+				ErrorType:      gross.ErrorType,
+				Backtrace:      gross.FailureBacktrace,
+			},
+			Custom: map[string]interface{}{},
+		},
+		Since:  gross.Since,
+		Expiry: gross.Expiry,
+		Wid:    gross.Wid,
+	}
+	return r, nil
+}
+
 func (m *manager) Acknowledge(jid string) (*client.Job, error) {
 	res := m.clearReservation(jid)
 	if res == nil {
@@ -246,8 +301,7 @@ func (m *manager) ReapExpiredJobs(when time.Time) (int64, error) {
 	for {
 		tm := util.Thens(when)
 		count, err := m.store.Working().RemoveBefore(tm, 10, func(data []byte) error {
-			var res Reservation
-			err := json.Unmarshal(data, &res)
+			res, err := unmarshalReservation(data)
 			if err != nil {
 				return fmt.Errorf("cannot unmarshal reservation payload: %w", err)
 			}
