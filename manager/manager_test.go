@@ -13,6 +13,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func withSqlite(t *testing.T, name string, fn func(*testing.T, storage.Store)) {
+	t.Parallel()
+	os.RemoveAll("./db")
+	store, err := storage.NewSqliteStore("db")
+	if err != nil {
+		panic(err)
+	}
+	fn(t, store)
+	defer os.RemoveAll("./db")
+}
+
 func TestManagerBasics(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, []string{"b", "c"}, filter([]string{"a"}, []string{"a", "b", "c"}))
@@ -20,8 +31,7 @@ func TestManagerBasics(t *testing.T) {
 }
 
 func TestManager(t *testing.T) {
-	withRedis(t, "manager", func(t *testing.T, store storage.Store) {
-
+	withSqlite(t, "manager", func(t *testing.T, store storage.Store) {
 		t.Run("Push", func(t *testing.T) {
 			store.Flush()
 			m := NewManager(store)
@@ -260,6 +270,11 @@ func TestManager(t *testing.T) {
 		})
 
 		t.Run("FetchFromMultipleQueues", func(t *testing.T) {
+			//flush quita todo de la bd, de memoria con queueset no
+			//consultamos memoria primero, estan las colas default y email
+			//luego consultamos bd, no esta default y email en rqueues
+			//devolvemos nulo, que hace redis?
+
 			store.Flush()
 			m := NewManager(store)
 

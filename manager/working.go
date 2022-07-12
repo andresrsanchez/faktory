@@ -137,7 +137,7 @@ func (m *manager) reserve(wid string, lease Lease) error {
 		texpiry: exp,
 	}
 
-	data, err := json.Marshal(res)
+	data, err := res.marshal()
 	if err != nil {
 		return fmt.Errorf("cannot marshal reservation payload: %w", err)
 	}
@@ -152,6 +152,61 @@ func (m *manager) reserve(wid string, lease Lease) error {
 	m.workingMutex.Unlock()
 
 	return nil
+}
+
+func (r *Reservation) marshal() ([]byte, error) {
+	job := r.Job
+	fail := r.Job.Failure
+	if fail == nil {
+		fail = &client.Failure{}
+	}
+	// args, _ := json.Marshal(job.Args)
+	// bt, _ := json.Marshal(fail.Backtrace)
+	gross := struct {
+		Jid              string        `json:"jid"`
+		Queue            string        `json:"queue"`
+		Type             string        `json:"jobtype"`
+		Args             []interface{} `json:"args"`
+		CreatedAt        string        `json:"created_at,omitempty"`
+		EnqueuedAt       string        `json:"enqueued_at,omitempty"`
+		At               string        `json:"at,omitempty"`
+		ReserveFor       int           `json:"reserve_for,omitempty"`
+		Retry            *int          `json:"retry"`
+		Backtrace        int           `json:"backtrace,omitempty"`
+		RetryCount       int           `json:"retry_count"`
+		RetryRemaining   int           `json:"remaining"`
+		FailedAt         string        `json:"failed_at"`
+		NextAt           string        `json:"next_at,omitempty"`
+		ErrorMessage     string        `json:"message,omitempty"`
+		ErrorType        string        `json:"errtype,omitempty"`
+		FailureBacktrace []string      `json:"fbacktrace,omitempty"` //is []string
+		Since            string        `json:"reserved_at"`
+		Expiry           string        `json:"expires_at"`
+		Wid              string        `json:"wid"`
+	}{
+		job.Jid,
+		job.Queue,
+		job.Type,
+		job.Args,
+		job.CreatedAt,
+		job.EnqueuedAt,
+		job.At,
+		job.ReserveFor,
+		job.Retry,
+		job.Backtrace,
+		fail.RetryCount,
+		fail.RetryRemaining,
+		fail.FailedAt,
+		fail.NextAt,
+		fail.ErrorMessage,
+		fail.ErrorType,
+		fail.Backtrace,
+		r.Since,
+		r.Expiry,
+		r.Wid,
+	}
+	data, err := json.Marshal(gross)
+	return data, err
 }
 
 func (m *manager) Acknowledge(jid string) (*client.Job, error) {

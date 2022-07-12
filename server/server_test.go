@@ -107,7 +107,6 @@ func TestServerStart(t *testing.T) {
 		hash := make(map[string]interface{})
 		err = json.Unmarshal([]byte(result), &hash)
 		assert.NoError(t, err)
-		// fmt.Println(hash)
 		assert.Equal(t, "12345678901234567890abcd", hash["jid"])
 		// assert.Equal(t, "{\"jid\":\"12345678901234567890abcd\",\"class\":\"Thing\",\"args\":[123],\"queue\":\"default\"}\n", result)
 
@@ -115,7 +114,6 @@ func TestServerStart(t *testing.T) {
 		result, err = buf.ReadString('\n')
 		assert.NoError(t, err)
 		assert.Equal(t, "+OK\r\n", result)
-
 		_, _ = fmt.Fprintf(conn, "ACK {\"jid\":%q}\n", hash["jid"])
 		result, err = buf.ReadString('\n')
 		assert.NoError(t, err)

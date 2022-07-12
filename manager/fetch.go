@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/contribsys/faktory/client"
@@ -103,7 +102,6 @@ restart:
 	if err != nil {
 		return nil, err
 	}
-
 	if lease != Nothing {
 		job, err := lease.Job()
 		if err != nil {
@@ -188,45 +186,86 @@ func (f *BasicFetch) Fetch(ctx context.Context, wid string, queues ...string) (L
 	return Nothing, nil
 }
 
+//queues ordering is important
+//block the first one 2 seconds if there are any jobs on it
+
 func brpop(db *sql.DB, queues []interface{}) ([]byte, error) { //empty queues?
-	query := "select name from queues where name in (?" + strings.Repeat(",?", len(queues)-1) + ")"
+	if len(queues) == 0 {
+		return nil, nil
+	}
+	query := "select name from queues"
 	rows, err := db.Query(query, queues...)
 	if err != nil {
 		return nil, err
 	}
-	var rqueues []string
+	rqueues := make(map[string]bool)
 	for rows.Next() {
 		var name string
 		err := rows.Scan(&name)
 		if err != nil {
 			continue
 		}
-		rqueues = append(rqueues, name)
+		rqueues[name] = true
 	}
-	query = "delete from jobs where id = (select id from jobs limit 1) returning jid, queue, jobtype, args, created_at, at, retry, enqueued_at"
-	var j client.Job
-	var args string
-	var enq, at sql.NullString
-	for _, q := range rqueues {
-		queue, err := sql.Open("sqlite", filepath.Join("db", q))
-		if err != nil {
-			continue
-		}
-		err = queue.QueryRow(query).Scan(&j.Jid, &j.Queue, &j.Type, &args, &j.CreatedAt, &at, &j.Retry, &enq)
-		queue.Close()
-		if err != nil {
-			if err == sql.ErrNoRows {
+	if len(rqueues) == 0 {
+		return nil, nil
+	}
+	query = `delete from jobs where id = (select id from jobs limit 1) returning jid, queue, jobtype, args, created_at, at, enqueued_at, 
+	retry, reserve_for, backtrace, retry_count, remaining, failed_at, next_at, err_msg, err_type, fbacktrace`
+	timeout := time.After(2 * time.Second)
+	var i int
+	var r []byte
+	for {
+		select {
+		case <-timeout:
+			return r, nil
+		default:
+			if i == len(rqueues) {
+				i = 0
+			}
+			name := queues[i].(string)
+			if _, ok := rqueues[name]; !ok {
+				i++
 				continue
 			}
-			return nil, err
+			queue, err := sql.Open("sqlite", filepath.Join("db", name))
+			if err != nil {
+				i++
+				continue
+			}
+			j, err := ScanJob(queue.QueryRow(query))
+			if err != nil {
+				i++
+				continue
+			}
+			queue.Close()
+			return json.Marshal(j)
 		}
-		j.EnqueuedAt = enq.String
-		j.At = at.String
-		err = json.Unmarshal([]byte(args), &j.Args)
-		if err != nil {
-			continue
-		}
-		return json.Marshal(j)
 	}
-	return nil, nil
+}
+
+func ScanJob(row *sql.Row) (*client.Job, error) {
+	j := &client.Job{Failure: &client.Failure{}}
+	var args string
+	var created, enqueue, at, failed, next, msg, etype, fbacktrace sql.NullString
+	var reserve, retry, rcount, remaining, trace sql.NullInt32
+	err := row.Scan(&j.Jid, &j.Queue, &j.Type, &args, &created, &at, &enqueue, &retry, &reserve, &trace, &rcount, &remaining, &failed, &next, &msg, &etype, &fbacktrace)
+	if err != nil {
+		return nil, err
+	}
+	json.Unmarshal([]byte(args), &j.Args)
+	j.CreatedAt = created.String
+	j.EnqueuedAt = enqueue.String
+	j.At = at.String
+	//*j.Retry = int(retry.Int32)
+	j.ReserveFor = int(reserve.Int32)
+	j.Backtrace = int(trace.Int32)
+	j.Failure.RetryCount = int(rcount.Int32)
+	j.Failure.RetryRemaining = int(remaining.Int32)
+	j.Failure.FailedAt = failed.String
+	j.Failure.NextAt = next.String
+	j.Failure.ErrorMessage = msg.String
+	j.Failure.ErrorType = etype.String
+	//j.Failure.Backtrace = fbacktrace
+	return j, nil
 }

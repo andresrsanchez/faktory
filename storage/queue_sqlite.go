@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"os"
 	"strings"
 
 	"github.com/contribsys/faktory/client"
@@ -80,8 +79,16 @@ func (q *sqliteQueue) Each(fn func(index int, data []byte) error) error {
 func (q *sqliteQueue) Clear() (uint64, error) {
 	q.store.mu.Lock()
 	defer q.store.mu.Unlock() //is necessary?
-	_, err := q.db.Exec("delete from jobs")
-	return 0, err
+	_, err := q.store.db.Exec("delete from queues where name=?", q.name)
+	if err != nil {
+		return 0, err
+	}
+	_, err = q.db.Exec("delete from jobs")
+	if err != nil {
+		return 0, err
+	}
+	delete(q.store.queueSet, q.name)
+	return 0, nil
 }
 
 func (q *sqliteQueue) Size() uint64 {
@@ -184,15 +191,27 @@ func (store *sqliteStore) NewQueue(name string) (*sqliteQueue, error) {
 
 	q := `
 	create table if not exists jobs (
-		id integer primary key, 
+		id integer not null primary key, 
 		jid text not null unique,
 		queue text not null,
 		jobtype text not null,
 		args text not null,
-		created_at datetime not null,
+		created_at datetime,
 		enqueued_at datetime,
-		at datetime,
-		retry integer
+		at datetime not null,
+		retry integer,
+		reserved_at datetime,
+		expires_at datetime,
+		backtrace int,
+		wid text,
+		reserve_for int,
+		retry_count int,
+		remaining int,
+		failed_at datetime,
+		next_at datetime,
+		err_msg text,
+		err_type text,
+		fbacktrace text
 	)`
 	_, err = db.Exec(q)
 	if err != nil {
@@ -200,7 +219,7 @@ func (store *sqliteStore) NewQueue(name string) (*sqliteQueue, error) {
 	}
 	_, err = store.db.Exec("insert into queues(name) values(?)", name)
 	if err != nil {
-		os.Remove(name) //review
+		return nil, err
 	}
 	sq := &sqliteQueue{
 		name:  name,

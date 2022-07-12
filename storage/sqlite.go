@@ -134,9 +134,22 @@ func (ss *sqliteStore) initSorted() error {
 		queue text not null,
 		jobtype text not null,
 		args text not null,
-		created_at datetime not null,
+		created_at datetime,
+		enqueued_at datetime,
 		at datetime not null,
-		retry integer
+		retry integer,
+		reserved_at datetime,
+		expires_at datetime,
+		backtrace int,
+		wid text,
+		reserve_for int,
+		retry_count int,
+		remaining int,
+		failed_at datetime,
+		next_at datetime,
+		err_msg text,
+		err_type text,
+		fbacktrace text
 	)`
 	initEntryDB := func(name string) (*sqliteSorted, error) {
 		db, err := getConn(name)
@@ -169,6 +182,46 @@ func (ss *sqliteStore) initSorted() error {
 	return err
 }
 
+func scanJob(row *sql.Row) (*client.Job, error) {
+	var id int
+	var j client.Job
+	var args string
+	var created, enqueue, at, reserved, expires, wid, failed, next, msg, jtype, trace sql.NullString
+	var reserve, retry, rcount, remaining sql.NullInt32
+	err := row.Scan(&id, &j.Jid, &j.Queue, &j.Type, &args, &created, &enqueue, &at, &retry, &reserved, &expires, &wid, &reserve, &rcount, &remaining, &failed, &next, &msg, &jtype, &trace)
+	if err != nil {
+		return nil, err
+	}
+	err = json.Unmarshal([]byte(args), &j.Args)
+	if err != nil {
+		return nil, err
+	}
+	j.EnqueuedAt = enqueue.String
+	j.At = at.String
+	*j.Retry = int(retry.Int32)
+	// j.rese
+	return &j, nil
+	// id integer not null primary key,
+	// 	jid text not null unique,
+	// 	queue text not null,
+	// 	jobtype text not null,
+	// 	args text not null,
+	// 	created_at datetime not null,
+	// 	enqueued_at datetime,
+	// 	at datetime not null,
+	// 	retry integer,
+	// 	reserved_at datetime,
+	// 	expires_at datetime,
+	// 	wid text,
+	// 	retry_count int,
+	// 	remaining int,
+	// 	failed_at datetime,
+	// 	next_at datetime,
+	// 	err_msg text,
+	// 	err_tpe text,
+	// 	backtrace text
+}
+
 func (store *sqliteStore) Stats() map[string]string {
 	return map[string]string{}
 }
@@ -178,7 +231,7 @@ func (store *sqliteStore) PausedQueues() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var r []string
+	r := []string{}
 	for rows.Next() {
 		var name string
 		err := rows.Scan(&name)
@@ -198,7 +251,30 @@ func (store *sqliteStore) EachQueue(x func(Queue)) {
 }
 
 func (store *sqliteStore) Flush() error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.queueSet = map[string]*sqliteQueue{}
+	flush := func(db *sql.DB) error {
+		_, err := db.Exec("delete from jobs")
+		return err
+	}
 	_, err := store.db.Exec("delete from queues")
+	if err != nil {
+		return err
+	}
+	err = flush(store.dead.db)
+	if err != nil {
+		return err
+	}
+	err = flush(store.retries.db)
+	if err != nil {
+		return err
+	}
+	err = flush(store.scheduled.db)
+	if err != nil {
+		return err
+	}
+	err = flush(store.working.db)
 	return err
 }
 

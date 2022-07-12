@@ -39,16 +39,16 @@ func (ss *sqliteSorted) insertJob(job *client.Job) error {
 	if err != nil {
 		return err
 	}
-	q := `insert into jobs(jid, queue, jobtype, args, created_at, at, retry) values (?,?,?,?,?,?,?)`
-	_, err = ss.db.Exec(q, job.Jid, job.Queue, job.Type, string(b), job.CreatedAt, job.At, job.Retry)
+	q := `insert into jobs(jid, queue, jobtype, args, created_at, enqueued_at, at, retry) values (?,?,?,?,?,?,?,?)`
+	_, err = ss.db.Exec(q, job.Jid, job.Queue, job.Type, string(b), job.CreatedAt, job.EnqueuedAt, job.At, job.Retry)
 	return err
 }
 
 func (ss *sqliteSorted) Get(key []byte) (SortedEntry, error) {
 	var args string
 	var j client.Job
-	q := `select jid, queue, jobtype, args, created_at, at, retry from jobs where jid=?`
-	if err := ss.db.QueryRow(q, string(key)).Scan(&j.Jid, &j.Queue, &j.Type, &args, &j.CreatedAt, &j.At, &j.Retry); err != nil {
+	q := `select jid, queue, jobtype, args, created_at, enqueued_at, at, retry from jobs where jid=?`
+	if err := ss.db.QueryRow(q, string(key)).Scan(&j.Jid, &j.Queue, &j.Type, &args, &j.CreatedAt, &j.EnqueuedAt, &j.At, &j.Retry); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -70,7 +70,7 @@ func (ss *sqliteSorted) Find(match string, fn func(index int, e SortedEntry) err
 		Jobtype string        `json:"jobtype,omitempty"`
 	}{}
 	var builder strings.Builder
-	builder.WriteString("select jid, queue, jobtype, args, created_at, at, retry from jobs where 1 ")
+	builder.WriteString("select jid, queue, jobtype, args, created_at, enqueued_at, at, retry from jobs where 1 ")
 	if match != "*" {
 		err := json.Unmarshal([]byte(match), &weird)
 		if err != nil {
@@ -94,7 +94,7 @@ func (ss *sqliteSorted) Find(match string, fn func(index int, e SortedEntry) err
 	for rows.Next() {
 		var j client.Job
 		var args string
-		err = rows.Scan(&j.Jid, &j.Queue, &j.Type, &args, &j.CreatedAt, &j.At, &j.Retry)
+		err = rows.Scan(&j.Jid, &j.Queue, &j.Type, &args, &j.CreatedAt, &j.EnqueuedAt, &j.At, &j.Retry)
 		if err != nil {
 			continue
 		}
@@ -107,7 +107,7 @@ func (ss *sqliteSorted) Find(match string, fn func(index int, e SortedEntry) err
 }
 
 func (ss *sqliteSorted) Page(start int, count int, fn func(index int, e SortedEntry) error) (int, error) {
-	q := `select jid, queue, jobtype, args, created_at, at, retry from jobs limit ? offset ?`
+	q := `select jid, queue, jobtype, args, created_at, enqueued_at, at, retry from jobs limit ? offset ?`
 	rows, err := ss.db.Query(q, count, start)
 	if err != nil {
 		return 0, err
@@ -116,7 +116,7 @@ func (ss *sqliteSorted) Page(start int, count int, fn func(index int, e SortedEn
 	for rows.Next() {
 		var args string
 		var j client.Job
-		err = rows.Scan(&j.Jid, &j.Queue, &j.Type, &args, &j.CreatedAt, &j.At, &j.Retry)
+		err = rows.Scan(&j.Jid, &j.Queue, &j.Type, &args, &j.CreatedAt, &j.EnqueuedAt, &j.At, &j.Retry)
 		if err != nil {
 			continue
 		}
@@ -203,10 +203,36 @@ func (ss *sqliteSorted) AddElement(timestamp string, jid string, payload []byte)
 	if err != nil {
 		return err
 	}
-	var j client.Job
-	err = json.Unmarshal(payload, &j)
+	t := struct {
+		Jid              string        `json:"jid"`
+		Queue            string        `json:"queue"`
+		Type             string        `json:"jobtype"`
+		Args             []interface{} `json:"args"`
+		CreatedAt        string        `json:"created_at,omitempty"`
+		EnqueuedAt       string        `json:"enqueued_at,omitempty"`
+		At               string        `json:"at,omitempty"`
+		ReserveFor       int           `json:"reserve_for,omitempty"`
+		Retry            *int          `json:"retry"`
+		Backtrace        int           `json:"backtrace,omitempty"`
+		RetryCount       int           `json:"retry_count"`
+		RetryRemaining   int           `json:"remaining"`
+		FailedAt         string        `json:"failed_at"`
+		NextAt           string        `json:"next_at,omitempty"`
+		ErrorMessage     string        `json:"message,omitempty"`
+		ErrorType        string        `json:"errtype,omitempty"`
+		FailureBacktrace []interface{} `json:"fbacktrace,omitempty"`
+		Since            string        `json:"reserved_at"`
+		Expiry           string        `json:"expires_at"`
+		Wid              string        `json:"wid"`
+	}{}
+	err = json.Unmarshal(payload, &t)
 	if err != nil {
 		return err
 	}
-	return ss.insertJob(&j)
+	q := `insert into jobs(jid, queue, jobtype, args, created_at, enqueued_at, at, reserve_for, retry, backtrace, retry_count, remaining, failed_at, next_at, err_msg, err_type, fbacktrace, reserved_at, expires_at, wid) 
+	values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+	args, _ := json.Marshal(t.Args)
+	bt, _ := json.Marshal(t.FailureBacktrace)
+	_, err = ss.db.Exec(q, t.Jid, t.Queue, t.Type, args, t.CreatedAt, t.EnqueuedAt, t.At, t.ReserveFor, t.Retry, t.Backtrace, t.RetryCount, t.RetryRemaining, t.FailedAt, t.NextAt, t.ErrorMessage, t.ErrorType, bt, t.Since, t.Expiry, t.Wid)
+	return err
 }
