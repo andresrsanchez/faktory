@@ -111,13 +111,6 @@ func (q *sqliteQueue) insertIntoQueue(job *client.Job) error {
 	}
 	query := `insert into jobs(jid, queue, jobtype, args, created_at, at, retry, enqueued_at) values (?,?,?,?,?,?,?,?)`
 	_, err = q.db.Exec(query, job.Jid, job.Queue, job.Type, string(b), job.CreatedAt, job.At, job.Retry, job.EnqueuedAt)
-	if err != nil {
-		var lol int
-		q.db.QueryRow("pragma busy_timeout;").Scan(&lol)
-		fmt.Println(lol)
-		fmt.Println("cannot enqueue")
-		fmt.Println(err)
-	}
 	return err
 }
 
@@ -191,7 +184,6 @@ func (q *sqliteQueue) Delete(vals [][]byte) error {
 }
 
 func (store *sqliteStore) NewQueue(name string) (*sqliteQueue, error) {
-	fmt.Println("new queue with name..." + name)
 	db, err := getConn(store.Name, name)
 	db.SetMaxOpenConns(1)
 	if err != nil {
@@ -199,20 +191,16 @@ func (store *sqliteStore) NewQueue(name string) (*sqliteQueue, error) {
 	}
 	_, err = db.Exec("PRAGMA journal_mode = WAL")
 	if err != nil {
-		fmt.Println("lol")
 		fmt.Println(err)
 	}
 	_, err = db.Exec("PRAGMA synchronous = NORMAL")
 	if err != nil {
-		fmt.Println("lel")
 		fmt.Println(err)
 	}
-	_, err = db.Exec("PRAGMA busy_timeout = 5000")
-	if err != nil {
-		fmt.Println("lil")
-		fmt.Println(err)
-	}
-	fmt.Println("im pragmatic")
+	// _, err = db.Exec("PRAGMA busy_timeout = 5000")
+	// if err != nil {
+	// 	fmt.Println(err)
+	// }
 	q := `
 	create table if not exists jobs (
 		id integer not null primary key, 
@@ -252,9 +240,5 @@ func (store *sqliteStore) NewQueue(name string) (*sqliteQueue, error) {
 		db:    db,
 	}
 	store.queueSet[name] = sq //unsafe
-	var lol int
-	sq.db.QueryRow("pragma busy_timeout;").Scan(&lol)
-	fmt.Println(lol)
-	fmt.Println("thats the lol")
 	return sq, nil
 }

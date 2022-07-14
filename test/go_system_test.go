@@ -99,7 +99,7 @@ func pushAndPop(t *testing.T, count int) {
 		}
 	}
 	util.Info("Popping")
-
+	// panic(fmt.Errorf("suficiente"))
 	for i := 0; i < count; i++ {
 		job, err := cl.Fetch("default")
 		if err != nil {

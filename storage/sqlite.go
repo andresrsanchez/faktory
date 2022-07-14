@@ -77,7 +77,6 @@ func (e *dummyEntry) Job() (*client.Job, error) {
 }
 
 func NewSqliteStore(name string) (Store, error) {
-	fmt.Println("creating store with name: " + name)
 	os.MkdirAll(fmt.Sprintf("./%s", name), os.ModePerm)
 	db, err := getConn(name, name)
 	if err != nil {
@@ -123,7 +122,6 @@ func NewSqliteStore(name string) (Store, error) {
 	for rows.Next() {
 		var name string
 		rows.Scan(&name)
-		fmt.Println("i dont know tfuck im doing with: " + name)
 		q, err := ss.NewQueue(name)
 		if err != nil {
 			continue

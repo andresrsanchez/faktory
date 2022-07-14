@@ -227,9 +227,9 @@ func brpop(main string, db *sql.DB, queues []interface{}) ([]byte, error) { //em
 				i++
 				continue
 			}
+			fmt.Println("the queue: " + name)
 			queue, err := sql.Open("sqlite", filepath.Join(main, name))
 			if err != nil {
-				fmt.Println("eror1")
 				i++
 				continue
 			}

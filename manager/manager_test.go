@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"testing"
@@ -24,26 +23,6 @@ func withSqlite(t *testing.T, name string, fn func(*testing.T, storage.Store)) {
 	fn(t, store)
 }
 
-func TestStupiDatabase(t *testing.T) {
-	os.RemoveAll("stupidatabase")
-	db, err := sql.Open("sqlite", "stupidatabase")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = db.Exec("PRAGMA busy_timeout = 3000;")
-	var lol int
-	err = db.QueryRow("pragma busy_timeout;").Scan(&lol)
-	fmt.Println(lol)
-	rows, _ := db.Query("select 1")
-	for rows.Next() {
-		rows.Scan(&lol)
-	}
-	rows.Close()
-
-	var lel int
-	err = db.QueryRow("pragma busy_timeout;").Scan(&lel)
-	fmt.Println(lel)
-}
 func TestManagerBasics(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, []string{"b", "c"}, filter([]string{"a"}, []string{"a", "b", "c"}))
