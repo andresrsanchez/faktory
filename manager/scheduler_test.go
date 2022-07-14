@@ -12,7 +12,7 @@ import (
 )
 
 func TestScheduler(t *testing.T) {
-	withRedis(t, "scheduler", func(t *testing.T, store storage.Store) {
+	withSqlite(t, "testing-scheduler", func(t *testing.T, store storage.Store) {
 
 		t.Run("Purge", func(t *testing.T) {
 			store.Flush()
@@ -127,6 +127,7 @@ func TestScheduler(t *testing.T) {
 }
 
 func addJob(t *testing.T, set storage.SortedSet, timestamp string, job *client.Job) {
+	job.At = timestamp
 	data, err := json.Marshal(job)
 	assert.NoError(t, err)
 

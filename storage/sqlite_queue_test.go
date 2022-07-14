@@ -10,7 +10,7 @@ import (
 )
 
 func TestSqliteBasicQueueOps(t *testing.T) {
-	withSqlite(t, "sqqueue", func(t *testing.T, store Store) {
+	withSqlite(t, "testing-sqqueue", func(t *testing.T, store Store) {
 		t.Run("Push", func(t *testing.T) {
 			store.Flush()
 			q, err := store.GetQueue("default")

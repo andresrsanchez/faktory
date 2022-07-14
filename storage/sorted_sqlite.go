@@ -91,6 +91,7 @@ func (ss *sqliteSorted) Find(match string, fn func(index int, e SortedEntry) err
 		return err
 	}
 	var idx int
+	defer rows.Close()
 	for rows.Next() {
 		var j client.Job
 		var args string
@@ -113,6 +114,7 @@ func (ss *sqliteSorted) Page(start int, count int, fn func(index int, e SortedEn
 		return 0, err
 	}
 	var idx int
+	defer rows.Close()
 	for rows.Next() {
 		var args string
 		var j client.Job

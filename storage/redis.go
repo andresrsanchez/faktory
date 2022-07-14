@@ -264,6 +264,7 @@ func (store *redisStore) ExistingQueue(name string) (Queue, bool) {
 
 // creates the queue if it doesn't already exist
 func (store *redisStore) GetQueue(name string) (Queue, error) {
+	return nil, nil
 	if name == "" {
 		return nil, fmt.Errorf("queue name cannot be blank")
 	}
@@ -293,8 +294,8 @@ func (store *redisStore) GetQueue(name string) (Queue, error) {
 	return q, nil
 }
 
-func (store *redisStore) Sqlite() *sql.DB {
-	return nil
+func (store *redisStore) Sqlite() (string, *sql.DB) {
+	return "", nil
 }
 
 func (store *redisStore) Close() error {

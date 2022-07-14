@@ -8,7 +8,7 @@ import (
 )
 
 func TestStats(t *testing.T) {
-	withRedis(t, "history", func(t *testing.T, store Store) {
+	withSqlite(t, "testing-history", func(t *testing.T, store Store) {
 		store.Flush()
 		var err error
 

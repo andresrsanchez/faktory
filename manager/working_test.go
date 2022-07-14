@@ -11,7 +11,7 @@ import (
 )
 
 func TestLoadWorkingSet(t *testing.T) {
-	withSqlite(t, "working", func(t *testing.T, store storage.Store) {
+	withSqlite(t, "testing-working", func(t *testing.T, store storage.Store) {
 		t.Run("LoadWorkingSet", func(t *testing.T) {
 			store.Flush()
 			m := newManager(store)

@@ -1,17 +1,17 @@
 package storage
 
 import (
+	"fmt"
 	"os"
 	"testing"
 )
 
 func withSqlite(t *testing.T, name string, fn func(*testing.T, Store)) {
 	t.Parallel()
-	os.RemoveAll("./db")
-	store, err := NewSqliteStore("db")
+	os.RemoveAll(fmt.Sprintf("./%s", name))
+	store, err := NewSqliteStore(name)
 	if err != nil {
 		panic(err)
 	}
 	fn(t, store)
-	defer os.RemoveAll("./db")
 }

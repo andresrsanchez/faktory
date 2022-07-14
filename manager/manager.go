@@ -150,6 +150,7 @@ func (m *manager) Redis() *redis.Client {
 }
 
 func (m *manager) AddMiddleware(fntype string, fn MiddlewareFunc) {
+	fmt.Println("tfuckostia: " + fntype)
 	switch fntype {
 	case "push":
 		m.pushChain = append(m.pushChain, fn)
@@ -220,6 +221,7 @@ func (m *manager) Push(job *client.Job) error {
 
 	err = callMiddleware(m.pushChain, Ctx{context.Background(), job, m, nil}, func() error {
 		if job.At != "" {
+			fmt.Println("im not understanding shit")
 			if t.After(time.Now()) {
 				data, err := json.Marshal(job)
 				if err != nil {

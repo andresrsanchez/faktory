@@ -11,7 +11,7 @@ import (
 )
 
 func TestSqliteBasicSortedOps(t *testing.T) {
-	withSqlite(t, "sqqueue", func(t *testing.T, store Store) {
+	withSqlite(t, "testing-sstore", func(t *testing.T, store Store) {
 		t.Run("large set", func(t *testing.T) {
 			sset := store.Retries()
 			err := sset.Clear()

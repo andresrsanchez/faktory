@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"testing"
@@ -15,15 +16,34 @@ import (
 
 func withSqlite(t *testing.T, name string, fn func(*testing.T, storage.Store)) {
 	t.Parallel()
-	os.RemoveAll("./db")
-	store, err := storage.NewSqliteStore("db")
+	os.RemoveAll(fmt.Sprintf("./%s", name))
+	store, err := storage.NewSqliteStore(name)
 	if err != nil {
 		panic(err)
 	}
 	fn(t, store)
-	defer os.RemoveAll("./db")
 }
 
+func TestStupiDatabase(t *testing.T) {
+	os.RemoveAll("stupidatabase")
+	db, err := sql.Open("sqlite", "stupidatabase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec("PRAGMA busy_timeout = 3000;")
+	var lol int
+	err = db.QueryRow("pragma busy_timeout;").Scan(&lol)
+	fmt.Println(lol)
+	rows, _ := db.Query("select 1")
+	for rows.Next() {
+		rows.Scan(&lol)
+	}
+	rows.Close()
+
+	var lel int
+	err = db.QueryRow("pragma busy_timeout;").Scan(&lel)
+	fmt.Println(lel)
+}
 func TestManagerBasics(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, []string{"b", "c"}, filter([]string{"a"}, []string{"a", "b", "c"}))
@@ -31,7 +51,7 @@ func TestManagerBasics(t *testing.T) {
 }
 
 func TestManager(t *testing.T) {
-	withSqlite(t, "manager", func(t *testing.T, store storage.Store) {
+	withSqlite(t, "testing-manager", func(t *testing.T, store storage.Store) {
 		t.Run("Push", func(t *testing.T) {
 			store.Flush()
 			m := NewManager(store)
@@ -342,29 +362,4 @@ func TestManager(t *testing.T) {
 			assert.NotEmpty(t, fetchedJob)
 		})
 	})
-}
-
-func withRedis(t *testing.T, name string, fn func(*testing.T, storage.Store)) {
-	t.Parallel()
-
-	dir := fmt.Sprintf("/tmp/faktory-test-%s", name)
-	defer os.RemoveAll(dir)
-
-	sock := fmt.Sprintf("%s/redis.sock", dir)
-	stopper, err := storage.Boot(dir, sock)
-	if stopper != nil {
-		defer stopper()
-	}
-	if err != nil {
-		panic(err)
-	}
-
-	store, err := storage.Open(sock, 10)
-	if err != nil {
-		panic(err)
-	}
-	defer store.Close()
-
-	fn(t, store)
-
 }

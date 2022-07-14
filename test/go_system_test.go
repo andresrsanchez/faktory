@@ -25,6 +25,7 @@ func TestSystem(t *testing.T) {
 	opts := cli.ParseArguments()
 	util.InitLogger("info")
 
+	os.RemoveAll("./db")
 	dir := "/tmp/system.db"
 	defer os.RemoveAll(dir)
 

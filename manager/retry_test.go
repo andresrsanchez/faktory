@@ -9,7 +9,7 @@ import (
 )
 
 func TestRetry(t *testing.T) {
-	withRedis(t, "retry", func(t *testing.T, store storage.Store) {
+	withSqlite(t, "testing-retry", func(t *testing.T, store storage.Store) {
 
 		t.Run("fail", func(t *testing.T) {
 			store.Flush()

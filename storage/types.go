@@ -42,7 +42,7 @@ type Store interface {
 
 	Raw() KV
 	Redis
-	Sqlite() *sql.DB
+	Sqlite() (string, *sql.DB)
 }
 
 type Redis interface {

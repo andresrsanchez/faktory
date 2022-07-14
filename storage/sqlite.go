@@ -77,8 +77,9 @@ func (e *dummyEntry) Job() (*client.Job, error) {
 }
 
 func NewSqliteStore(name string) (Store, error) {
-	os.MkdirAll("./db", os.ModePerm)
-	db, err := getConn(name)
+	fmt.Println("creating store with name: " + name)
+	os.MkdirAll(fmt.Sprintf("./%s", name), os.ModePerm)
+	db, err := getConn(name, name)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +107,10 @@ func NewSqliteStore(name string) (Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, err = db.Exec("CREATE UNIQUE INDEX name_date ON history(name, date);")
+	db.Exec("PRAGMA journal_mode = WAL")
+	db.Exec("PRAGMA synchronous = NORMAL")
+
+	_, err = db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS name_date ON history(name, date);")
 	if err != nil {
 		return nil, err
 	}
@@ -115,9 +119,11 @@ func NewSqliteStore(name string) (Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var name string
 		rows.Scan(&name)
+		fmt.Println("i dont know tfuck im doing with: " + name)
 		q, err := ss.NewQueue(name)
 		if err != nil {
 			continue
@@ -127,8 +133,8 @@ func NewSqliteStore(name string) (Store, error) {
 	return ss, nil
 }
 
-func (ss *sqliteStore) Sqlite() *sql.DB {
-	return ss.db
+func (ss *sqliteStore) Sqlite() (string, *sql.DB) {
+	return ss.Name, ss.db
 }
 
 func (ss *sqliteStore) initSorted() error {
@@ -157,12 +163,14 @@ func (ss *sqliteStore) initSorted() error {
 		fbacktrace text
 	)`
 	initEntryDB := func(name string) (*sqliteSorted, error) {
-		db, err := getConn(name)
+		db, err := getConn(ss.Name, name)
 		if err != nil {
 			return nil, err
 		}
 		db.Exec("PRAGMA journal_mode = WAL")
 		db.Exec("PRAGMA synchronous = NORMAL")
+		db.Exec("PRAGMA busy_timeout = 5000")
+		db.SetMaxOpenConns(1)
 		_, err = db.Exec(q)
 		if err != nil {
 			return nil, err
@@ -274,6 +282,7 @@ func (store *sqliteStore) PausedQueues() ([]string, error) {
 		return nil, err
 	}
 	r := []string{}
+	defer rows.Close()
 	for rows.Next() {
 		var name string
 		err := rows.Scan(&name)
@@ -295,13 +304,25 @@ func (store *sqliteStore) EachQueue(x func(Queue)) {
 func (store *sqliteStore) Flush() error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	store.queueSet = map[string]*sqliteQueue{}
-	flush := func(db *sql.DB) error {
+	for k, _ := range store.queueSet {
+		db, _ := sql.Open("sqlite", filepath.Join(store.Name, k))
 		_, err := db.Exec("delete from jobs")
-		return err
+		if err != nil {
+			return err
+		}
+		db.Close()
 	}
+	store.queueSet = map[string]*sqliteQueue{}
 	_, err := store.db.Exec("delete from queues")
 	if err != nil {
+		return err
+	}
+	_, err = store.db.Exec("delete from history")
+	if err != nil {
+		return err
+	}
+	flush := func(db *sql.DB) error {
+		_, err := db.Exec("delete from jobs")
 		return err
 	}
 	err = flush(store.dead.db)
@@ -341,8 +362,9 @@ func (store *sqliteStore) GetQueue(name string) (Queue, error) {
 	return store.NewQueue(name)
 }
 
-func getConn(name string) (*sql.DB, error) {
-	return sql.Open("sqlite", filepath.Join("db", name))
+func getConn(folder string, name string) (*sql.DB, error) {
+	fmt.Printf("openin the conn with name: %s and folder: %s\n", name, folder)
+	return sql.Open("sqlite", filepath.Join(folder, name))
 }
 
 func (store *sqliteStore) Close() error {
@@ -373,7 +395,7 @@ func (store *sqliteStore) Dead() SortedSet {
 func (store *sqliteStore) EnqueueAll(sset SortedSet) error { //Review process batches?
 	query := `select jid, queue, jobtype, args, created_at, at, retry from jobs limit ? offset ?`
 	batches := func(offset int, limit int) ([]client.Job, error) {
-		db, err := getConn(sset.Name())
+		db, err := getConn(store.Name, sset.Name())
 		if err != nil {
 			return nil, err
 		}
@@ -382,6 +404,7 @@ func (store *sqliteStore) EnqueueAll(sset SortedSet) error { //Review process ba
 			return nil, err
 		}
 		var r []client.Job
+		defer rows.Close()
 		for rows.Next() {
 			var args string
 			var j client.Job
@@ -460,46 +483,59 @@ func (store *sqliteStore) EnqueueFrom(sset SortedSet, key []byte) error {
 
 func (store *sqliteStore) Success() error {
 	_, err := store.db.Exec("insert into history(name) values (?) on conflict(name,date) do update set count=count+1", "processed")
+	// _, err := store.db.Exec("insert into history(name) values (?)", "processed")
 	return err
 }
 func (store *sqliteStore) TotalProcessed() (r uint64) {
-	store.db.QueryRow("select count(1) from history where name=? and date=date('now')", "processed").Scan(&r)
+	store.db.QueryRow("select count from history where name=? and date=date('now')", "processed").Scan(&r)
 	return
 }
 func (store *sqliteStore) TotalFailures() (r uint64) {
-	store.db.QueryRow("select count(1) from history where name=? and date=date('now')", "failures").Scan(&r)
+	store.db.QueryRow("select count from history where name=? and date=date('now')", "failures").Scan(&r)
 	return
 }
 func (store *sqliteStore) Failure() error {
+	// _, err := store.db.Exec("insert into history(name) values (?)", "failures")
 	_, err := store.db.Exec("insert into history(name) values (?),(?) on conflict(name,date) do update set count=count+1", "failures", "processed")
 	return err
 }
 
 func (store *sqliteStore) History(days int, fn func(day string, procCnt uint64, failCnt uint64)) error {
-	before := time.Now().AddDate(0, 0, -days)
+	before := time.Now().AddDate(0, 0, -(days - 1))
 	daystrs := make([]string, days)
 	fails := make([]int, days)
 	procds := make([]int, days)
-	rows, err := store.db.Query("select name, count, date from history where date > ?", before.Format("2006-01-02"))
+	rows, err := store.db.Query("select name, count, date from history where date >= ?", before.Format("2006-01-02"))
 	if err != nil {
 		return err
 	}
-	var lastdate string
+	var p = make(map[string]int)
+	var f = make(map[string]int)
+	defer rows.Close()
 	for rows.Next() {
-		var name, date string
 		var count int
+		var name string
+		var date time.Time
 		err := rows.Scan(&name, &count, &date)
 		if err != nil {
 			continue
 		}
-		if date != lastdate {
-			daystrs = append(daystrs, date)
-		}
 		if name == "processed" {
-			procds = append(procds, count)
+			p[date.Format("2006-01-02")] = count
 		} else {
-			fails = append(fails, count)
+			f[date.Format("2006-01-02")] = count
 		}
+	}
+	for i := 0; i < days; i++ {
+		daystr := before.Format("2006-01-02")
+		daystrs[i] = daystr
+		if count, ok := p[daystr]; ok {
+			procds[i] = count
+		}
+		if count, ok := f[daystr]; ok {
+			fails[i] = count
+		}
+		before = before.Add(24 * time.Hour)
 	}
 	for idx := 0; idx < days; idx++ {
 		fn(daystrs[idx], uint64(procds[idx]), uint64(fails[idx]))
@@ -510,7 +546,7 @@ func (s *sqliteStore) Raw() KV {
 	return nil
 }
 
-func openSqlite(string, int) (Store, error) {
+func openSqlite(lel string, lol int) (Store, error) {
 	return NewSqliteStore("db")
 }
 
