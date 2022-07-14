@@ -102,8 +102,11 @@ func (m *manager) processFailure(jid string, failure *FailPayload) error {
 		}
 	}
 
-	_ = m.store.Failure()
-
+	err := m.store.Failure()
+	if err != nil {
+		fmt.Println("retrying")
+		fmt.Println(err)
+	}
 	job := res.Job
 
 	if job.Failure != nil {

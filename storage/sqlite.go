@@ -79,6 +79,7 @@ func (e *dummyEntry) Job() (*client.Job, error) {
 func NewSqliteStore(name string) (Store, error) {
 	os.MkdirAll(fmt.Sprintf("./%s", name), os.ModePerm)
 	db, err := getConn(name, name)
+	db.SetMaxOpenConns(1)
 	if err != nil {
 		return nil, err
 	}

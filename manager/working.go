@@ -291,6 +291,8 @@ func (m *manager) Acknowledge(jid string) (*client.Job, error) {
 		err = callMiddleware(m.ackChain, Ctx{context.Background(), res.Job, m, res}, func() error {
 			return nil
 		})
+	} else {
+		fmt.Println("lol")
 	}
 
 	return res.Job, err

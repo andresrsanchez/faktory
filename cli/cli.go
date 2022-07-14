@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -36,22 +35,22 @@ func ParseArguments() CliOptions {
 	}
 
 	defaults := CliOptions{"localhost:7419", "localhost:7420", fenv, "/etc/faktory", "info", "/var/lib/faktory/db"}
+	// return defaults
+	// flag.Usage = help
+	// flag.StringVar(&defaults.WebBinding, "w", "localhost:7420", "WebUI binding")
+	// flag.StringVar(&defaults.CmdBinding, "b", "localhost:7419", "Network binding")
+	// flag.StringVar(&defaults.LogLevel, "l", "info", "Logging level (error, warn, info, debug)")
+	// flag.StringVar(&defaults.Environment, "e", fenv, "Environment (development, staging, production)")
 
-	flag.Usage = help
-	flag.StringVar(&defaults.WebBinding, "w", "localhost:7420", "WebUI binding")
-	flag.StringVar(&defaults.CmdBinding, "b", "localhost:7419", "Network binding")
-	flag.StringVar(&defaults.LogLevel, "l", "info", "Logging level (error, warn, info, debug)")
-	flag.StringVar(&defaults.Environment, "e", fenv, "Environment (development, staging, production)")
+	// // undocumented on purpose, we don't want people changing these if possible
+	// flag.StringVar(&defaults.StorageDirectory, "d", "/var/lib/faktory/db", "Storage directory")
+	// flag.StringVar(&defaults.ConfigDirectory, "c", "/etc/faktory", "Config directory")
+	// versionPtr := flag.Bool("v", false, "Show version")
+	// flag.Parse()
 
-	// undocumented on purpose, we don't want people changing these if possible
-	flag.StringVar(&defaults.StorageDirectory, "d", "/var/lib/faktory/db", "Storage directory")
-	flag.StringVar(&defaults.ConfigDirectory, "c", "/etc/faktory", "Config directory")
-	versionPtr := flag.Bool("v", false, "Show version")
-	flag.Parse()
-
-	if *versionPtr {
-		os.Exit(0)
-	}
+	// if *versionPtr {
+	// 	os.Exit(0)
+	// }
 
 	if defaults.Environment == "development" {
 		envdir, ok := os.LookupEnv("HOME")

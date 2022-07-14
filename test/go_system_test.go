@@ -92,16 +92,24 @@ func pushAndPop(t *testing.T, count int) {
 	assert.NoError(t, err)
 
 	util.Info("Pushing")
+	start := time.Now()
 	for i := 0; i < count; i++ {
 		if err = pushJob(cl, i); err != nil {
+			fmt.Println("handling")
 			handleError(err)
 			return
 		}
 	}
+	fmt.Print("------------------start ")
+	fmt.Println(time.Since(start).Milliseconds())
 	util.Info("Popping")
+	end := time.Now()
 	// panic(fmt.Errorf("suficiente"))
+	var TotalFetch int64
 	for i := 0; i < count; i++ {
+		start := time.Now()
 		job, err := cl.Fetch("default")
+		TotalFetch += time.Since(start).Microseconds()
 		if err != nil {
 			handleError(err)
 			return
@@ -117,19 +125,25 @@ func pushAndPop(t *testing.T, count int) {
 			return
 		}
 	}
+	lol := time.Duration(TotalFetch) * time.Microsecond
+	fmt.Println("**********the millis**********")
+	fmt.Println(lol.Milliseconds())
+	fmt.Print("---------------------end ")
+	fmt.Println(time.Since(end).Milliseconds())
 	err = pushBulk(cl)
 	if err != nil {
+		fmt.Println("daerror2")
 		handleError(err)
 		return
 	}
 
 	util.Info("Done")
-	hash, err := cl.Info()
+	_, err = cl.Info()
 	if err != nil {
 		handleError(err)
 		return
 	}
-	util.Infof("%v", hash)
+	// util.Infof("%v", hash)
 }
 
 func pushJob(cl *client.Client, idx int) error {

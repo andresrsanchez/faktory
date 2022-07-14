@@ -191,10 +191,12 @@ func (store *sqliteStore) NewQueue(name string) (*sqliteQueue, error) {
 	}
 	_, err = db.Exec("PRAGMA journal_mode = WAL")
 	if err != nil {
+		fmt.Println("pragmatic1")
 		fmt.Println(err)
 	}
 	_, err = db.Exec("PRAGMA synchronous = NORMAL")
 	if err != nil {
+		fmt.Println("pragmatic2")
 		fmt.Println(err)
 	}
 	// _, err = db.Exec("PRAGMA busy_timeout = 5000")

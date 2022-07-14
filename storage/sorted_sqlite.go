@@ -164,7 +164,15 @@ func (ss *sqliteSorted) RemoveElement(timestamp string, jid string) (bool, error
 }
 
 func (ss *sqliteSorted) delete(jid string) error {
-	_, err := ss.db.Exec("delete from jobs where jid=?", jid)
+	r, err := ss.db.Exec("delete from jobs where jid=?", jid)
+	if af, err := r.RowsAffected(); err != nil || af == 0 {
+		fmt.Println(jid)
+		fmt.Println(af)
+		if err != nil {
+			fmt.Println("sorted")
+			fmt.Println(err)
+		}
+	}
 	return err
 }
 

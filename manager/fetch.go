@@ -195,6 +195,7 @@ func brpop(store storage.Store, queues []interface{}) ([]byte, error) { //empty 
 	query := "select name from queues"
 	rows, err := db.Query(query, queues...)
 	if err != nil {
+		fmt.Println("im selectin")
 		return nil, err
 	}
 	rqueues := make(map[string]bool)
@@ -227,13 +228,19 @@ func brpop(store storage.Store, queues []interface{}) ([]byte, error) { //empty 
 			name := queues[i].(string)
 			if _, ok := rqueues[name]; !ok {
 				i++
+				fmt.Println("not present")
 				continue
 			}
 			queue, err := store.GetQueue(name)
 			if err != nil {
+				fmt.Println("im getting the q")
 				continue
 			}
-			return queue.Pop()
+			data, err := queue.Pop()
+			if err != nil {
+				fmt.Println("im popping")
+			}
+			return data, err
 		}
 	}
 }
