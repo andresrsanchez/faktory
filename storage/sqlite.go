@@ -12,7 +12,7 @@ import (
 	"github.com/contribsys/faktory/client"
 	"github.com/contribsys/faktory/util"
 	"github.com/go-redis/redis"
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type sqliteSorted struct {
@@ -79,7 +79,6 @@ func (e *dummyEntry) Job() (*client.Job, error) {
 func NewSqliteStore(name string) (Store, error) {
 	os.MkdirAll(fmt.Sprintf("./%s", name), os.ModePerm)
 	db, err := getConn(name, name)
-	db.SetMaxOpenConns(1)
 	if err != nil {
 		return nil, err
 	}
@@ -107,8 +106,6 @@ func NewSqliteStore(name string) (Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.Exec("PRAGMA journal_mode = WAL")
-	db.Exec("PRAGMA synchronous = NORMAL")
 
 	_, err = db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS name_date ON history(name, date);")
 	if err != nil {
@@ -166,10 +163,6 @@ func (ss *sqliteStore) initSorted() error {
 		if err != nil {
 			return nil, err
 		}
-		db.Exec("PRAGMA journal_mode = WAL")
-		db.Exec("PRAGMA synchronous = NORMAL")
-		db.Exec("PRAGMA busy_timeout = 5000")
-		db.SetMaxOpenConns(1)
 		_, err = db.Exec(q)
 		if err != nil {
 			return nil, err
@@ -303,8 +296,9 @@ func (store *sqliteStore) EachQueue(x func(Queue)) {
 func (store *sqliteStore) Flush() error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	for k, _ := range store.queueSet {
-		db, _ := sql.Open("sqlite", filepath.Join(store.Name, k))
+	pragmas := "&_journal_mode=WAL&_synchronous=NORMAL&cache=shared"
+	for k := range store.queueSet {
+		db, _ := sql.Open("sqlite3", filepath.Join(store.Name, fmt.Sprintf("%s?%s", k, pragmas)))
 		_, err := db.Exec("delete from jobs")
 		if err != nil {
 			return err
@@ -362,8 +356,8 @@ func (store *sqliteStore) GetQueue(name string) (Queue, error) {
 }
 
 func getConn(folder string, name string) (*sql.DB, error) {
-	fmt.Printf("openin the conn with name: %s and folder: %s\n", name, folder)
-	return sql.Open("sqlite", filepath.Join(folder, name))
+	pragmas := "&_journal_mode=WAL&_synchronous=NORMAL&cache=shared"
+	return sql.Open("sqlite3", filepath.Join(folder, fmt.Sprintf("%s?%s", name, pragmas)))
 }
 
 func (store *sqliteStore) Close() error {

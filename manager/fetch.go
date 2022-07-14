@@ -11,7 +11,7 @@ import (
 	"github.com/contribsys/faktory/storage"
 	"github.com/contribsys/faktory/util"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 var (

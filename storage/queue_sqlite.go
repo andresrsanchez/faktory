@@ -4,12 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/contribsys/faktory/client"
 	"github.com/contribsys/faktory/util"
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type sqliteQueue struct {
@@ -185,24 +184,9 @@ func (q *sqliteQueue) Delete(vals [][]byte) error {
 
 func (store *sqliteStore) NewQueue(name string) (*sqliteQueue, error) {
 	db, err := getConn(store.Name, name)
-	db.SetMaxOpenConns(1)
 	if err != nil {
 		return nil, err
 	}
-	_, err = db.Exec("PRAGMA journal_mode = WAL")
-	if err != nil {
-		fmt.Println("pragmatic1")
-		fmt.Println(err)
-	}
-	_, err = db.Exec("PRAGMA synchronous = NORMAL")
-	if err != nil {
-		fmt.Println("pragmatic2")
-		fmt.Println(err)
-	}
-	// _, err = db.Exec("PRAGMA busy_timeout = 5000")
-	// if err != nil {
-	// 	fmt.Println(err)
-	// }
 	q := `
 	create table if not exists jobs (
 		id integer not null primary key, 

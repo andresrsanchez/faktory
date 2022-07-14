@@ -10,7 +10,7 @@ import (
 
 	"github.com/contribsys/faktory/client"
 	"github.com/contribsys/faktory/util"
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func (ss *sqliteSorted) Name() string {

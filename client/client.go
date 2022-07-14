@@ -323,10 +323,8 @@ func (c *Client) Push(job *Job) error {
 	return c.ok(c.rdr)
 }
 
-var TotalFetch int64
-
 func (c *Client) Fetch(q ...string) (*Job, error) {
-	start := time.Now()
+
 	if len(q) == 0 {
 		return nil, fmt.Errorf("Fetch must be called with one or more queue names")
 	}
@@ -350,7 +348,6 @@ func (c *Client) Fetch(q ...string) (*Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	TotalFetch += time.Since(start).Microseconds()
 	return &job, nil
 }
 
