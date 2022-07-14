@@ -133,7 +133,7 @@ func newManager(s storage.Store) *manager {
 	_ = m.loadWorkingSet()
 	p, _ := s.PausedQueues()
 	m.paused = p
-	m.fetcher = BasicFetcher(m.store.Sqlite())
+	m.fetcher = BasicFetcher(m.store)
 	return m
 }
 

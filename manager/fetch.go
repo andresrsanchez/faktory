@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/contribsys/faktory/client"
+	"github.com/contribsys/faktory/storage"
 	"github.com/contribsys/faktory/util"
 
 	_ "modernc.org/sqlite"
@@ -130,8 +130,7 @@ type Fetcher interface {
 }
 
 type BasicFetch struct {
-	name string
-	r    *sql.DB
+	s storage.Store
 }
 
 type simpleLease struct {
@@ -168,8 +167,8 @@ func (el *simpleLease) Job() (*client.Job, error) {
 	return el.job, nil
 }
 
-func BasicFetcher(name string, r *sql.DB) Fetcher {
-	return &BasicFetch{name: name, r: r}
+func BasicFetcher(s storage.Store) Fetcher {
+	return &BasicFetch{s: s}
 }
 
 func (f *BasicFetch) Fetch(ctx context.Context, wid string, queues ...string) (Lease, error) {
@@ -177,7 +176,7 @@ func (f *BasicFetch) Fetch(ctx context.Context, wid string, queues ...string) (L
 	for _, v := range queues {
 		weird = append(weird, v)
 	}
-	data, err := brpop(f.name, f.r, weird)
+	data, err := brpop(f.s, weird)
 	if err != nil {
 		return nil, err
 	}
@@ -187,10 +186,12 @@ func (f *BasicFetch) Fetch(ctx context.Context, wid string, queues ...string) (L
 	return Nothing, nil
 }
 
-func brpop(main string, db *sql.DB, queues []interface{}) ([]byte, error) { //empty queues?
+func brpop(store storage.Store, queues []interface{}) ([]byte, error) { //empty queues?
 	if len(queues) == 0 {
 		return nil, nil
 	}
+
+	_, db := store.Sqlite()
 	query := "select name from queues"
 	rows, err := db.Query(query, queues...)
 	if err != nil {
@@ -209,6 +210,7 @@ func brpop(main string, db *sql.DB, queues []interface{}) ([]byte, error) { //em
 	if len(rqueues) == 0 {
 		return nil, nil
 	}
+
 	query = `delete from jobs where id = (select id from jobs limit 1) returning jid, queue, jobtype, args, created_at, at, enqueued_at, 
 	retry, reserve_for, backtrace, retry_count, remaining, failed_at, next_at, err_msg, err_type, fbacktrace`
 	timeout := time.After(2 * time.Second)
@@ -227,21 +229,11 @@ func brpop(main string, db *sql.DB, queues []interface{}) ([]byte, error) { //em
 				i++
 				continue
 			}
-			fmt.Println("the queue: " + name)
-			queue, err := sql.Open("sqlite", filepath.Join(main, name))
+			queue, err := store.GetQueue(name)
 			if err != nil {
-				i++
 				continue
 			}
-			queue.Exec("PRAGMA busy_timeout = 5000")
-			j, err := ScanJob(queue.QueryRow(query))
-			if err != nil {
-				fmt.Println("eror2")
-				i++
-				continue
-			}
-			queue.Close()
-			return json.Marshal(j)
+			return queue.Pop()
 		}
 	}
 }
